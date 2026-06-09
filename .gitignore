@@ -1,0 +1,49 @@
+# ============================================================
+#  .gitignore — санхүүгийн нууц мэдээлэлтэй тул нягт
+#  Нууц утга/файл ХЭЗЭЭ Ч GitHub-д орохгүй.
+# ============================================================
+
+# ---- Нууц утга (.env) — ХЭЗЭЭ Ч оруулахгүй ----
+.env
+.env.*
+!.env.example
+
+# ---- Google OAuth нууц файлууд ----
+credentials.json
+client_secret*.json
+token*.json
+*.pem
+*.key
+
+# ---- Өгөгдлийн сан (бодит гүйлгээний түүх) ----
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.db
+data/
+
+# ---- Backup ----
+backups/
+*.sqlite.gz
+
+# ---- Нууц/хувийн гаралт (мерчант/гүйлгээний задаргаа) ----
+**/transactions-export.json
+**/descriptions-summary.csv
+
+# ---- Node ----
+node_modules/
+npm-debug.log*
+
+# ---- Build гаралт ----
+dist/
+build/
+
+# ---- Лог ----
+logs/
+*.log
+
+# ---- OS / editor ----
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
