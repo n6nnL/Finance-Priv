@@ -257,17 +257,28 @@ api/
 > автоматаар ангилагдана. Ингэснээр хоёр процесс (listener + API) override-ийг
 > хуваалцахын тулд DB хооронд холбогдох шаардлагагүй.
 
-### AI тохиргоо (Claude API)
+### AI тохиргоо (Claude API) — СОНГОЛТТОЙ (default унтраалттай)
 
 ```
-ANTHROPIC_API_KEY=sk-ant-...   # хоосон бол AI унтраалттай (pending_review, санал null)
+AI_CATEGORIZATION_ENABLED=false   # default унтраалттай
+ANTHROPIC_API_KEY=                 # хоосон бол ч AI унтраалттай
 ANTHROPIC_MODEL=claude-haiku-4-5
 ```
 
-- AI prompt нь ангиллын жагсаалтыг өгч, **таслагдсан/танихгүй мерчантыг буруу
-  таамаглахаас сэргийлж** `other`/low confidence буцаахыг шаарддаг.
-- System prompt-д prompt caching (`cache_control: ephemeral`).
-- Дуудалт амжилтгүй (key буруу, timeout) бол `other`/low буцаана — систем унтрахгүй.
+- AI идэвхтэй = `AI_CATEGORIZATION_ENABLED=true` **БА** `ANTHROPIC_API_KEY` байгаа.
+  Аль нэг нь дутвал AI унтраалттай.
+- **AI-гүй үед систем бүрэн ажиллана:** танигдаагүй гүйлгээ AI **саналгүйгээр**
+  (`ai_suggested_category=null`) шууд `pending_review` болж хэрэглэгчээс асуугдана.
+- AI дуудлага try/catch-д; алдаа (credit алга, network, rate limit) гарвал warning
+  log хийгээд гүйлгээ pending_review хэвээр — **систем хэзээ ч зогсохгүй**.
+- AI prompt: ангиллын жагсаалт өгч, таслагдсан мерчантыг буруу таамаглахаас
+  сэргийлж `other`/low буцаахыг шаарддаг. System prompt-д prompt caching.
+
+**AI-г дараа залгах (credit нэмсэн үед):**
+1. Anthropic данс руу credit нэмэх.
+2. `api/.env`-д хүчинтэй `ANTHROPIC_API_KEY=sk-ant-...` тавих.
+3. `AI_CATEGORIZATION_ENABLED=true` болгох.
+4. `pm2 restart bank-api` (эсвэл `pm2 reload all`). Код өөрчлөх шаардлагагүй.
 
 ### DB миграц (002)
 

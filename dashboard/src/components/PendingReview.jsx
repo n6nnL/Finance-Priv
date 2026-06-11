@@ -69,18 +69,14 @@ function PendingRow({ t, categories, onConfirmed }) {
         {isPos ? 'Энэ POS гүйлгээ. Ямар газар вэ?' : 'Энэ шилжүүлэг/төлбөр. Яагаад хийсэн бэ? Хэнд, юунд?'}
       </div>
 
-      {/* AI санал */}
-      <div className="mt-1.5 flex items-center gap-2 text-sm">
-        <span className="text-slate-500">AI санал:</span>
-        {hasSuggestion ? (
-          <>
-            <span className={`text-xs px-2 py-0.5 rounded-full ${catColor(suggestion)}`}>{catLabel(suggestion)}</span>
-            <span className={`text-xs px-2 py-0.5 rounded-full ${confColor(t.ai_confidence)}`}>{confLabel(t.ai_confidence)} итгэл</span>
-          </>
-        ) : (
-          <span className="text-xs text-slate-400">тодорхойгүй (гараар сонгоно уу)</span>
-        )}
-      </div>
+      {/* AI санал — ЗӨВХӨН санал байгаа үед харуулна (AI-гүй үед огт харагдахгүй) */}
+      {hasSuggestion && (
+        <div className="mt-1.5 flex items-center gap-2 text-sm">
+          <span className="text-slate-500">AI санал:</span>
+          <span className={`text-xs px-2 py-0.5 rounded-full ${catColor(suggestion)}`}>{catLabel(suggestion)}</span>
+          <span className={`text-xs px-2 py-0.5 rounded-full ${confColor(t.ai_confidence)}`}>{confLabel(t.ai_confidence)} итгэл</span>
+        </div>
+      )}
 
       {/* Төрлөөс хамаарсан оролт */}
       {isPos ? (

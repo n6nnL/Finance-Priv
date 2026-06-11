@@ -12,6 +12,7 @@
 
 import { categorizeByRules, INCOME_CATEGORY } from './categorize.js';
 import { normalizeMerchant } from './db.js';
+import { logger } from './logger.js';
 
 /**
  * @param {object} args
@@ -51,8 +52,10 @@ export async function classifyTransaction({ description, type, db, ai }) {
       const r = await ai.aiCategorize(description);
       aiSuggestedCategory = r.category ?? null;
       aiConfidence = r.confidence ?? null;
-    } catch {
-      /* AI алдаа → санал null, pending_review хэвээр */
+    } catch (err) {
+      // AI алдаа (credit алга, network, rate limit) → санал null, gүйлгээ
+      // pending_review хэвээр. Систем ЗОГСОХГҮЙ — зүгээр warning log.
+      logger.warn('AI categorize алдаа — саналгүйгээр pending_review', { err: err?.message });
     }
   }
   return { category: null, status: 'pending_review', aiSuggestedCategory, aiConfidence };

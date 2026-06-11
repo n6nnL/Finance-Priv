@@ -15,8 +15,9 @@ import { listCategories } from './categorize.js';
 
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
 
-export function createAi({ apiKey, model } = {}) {
-  const enabled = !!apiKey;
+export function createAi({ apiKey, model, enabled: toggle = true } = {}) {
+  // AI идэвхтэй = toggle асаалттай БА key байгаа. Аль нэг нь дутвал унтраалттай.
+  const enabled = !!toggle && !!apiKey;
   const categories = listCategories();
 
   // Давтагдах systemийг cache_control-оор кэшилнэ (prompt caching).

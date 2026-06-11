@@ -42,6 +42,11 @@ function num(name, fallback) {
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
 }
+function bool(name, fallback) {
+  const v = process.env[name];
+  if (v == null || v.trim() === '') return fallback;
+  return /^(1|true|yes|on)$/i.test(v.trim());
+}
 
 export const config = {
   port: num('PORT', 3000),
@@ -55,7 +60,10 @@ export const config = {
   bodyLimit: optional('BODY_LIMIT', '100kb'),
   logLevel: optional('LOG_LEVEL', 'info'),
   ai: {
-    // Хоосон бол AI унтраалттай — танигдаагүй гүйлгээ pending_review (санал null)
+    // AI ангилал СОНГОЛТТОЙ. Идэвхтэй болохын тулд toggle=true БА key байх ёстой.
+    // Default: унтраалттай (хэрэглэгч одоогоор credit-гүй). AI-гүй үед танигдаагүй
+    // гүйлгээ AI саналгүйгээр pending_review болж, хэрэглэгчээс асууна.
+    enabled: bool('AI_CATEGORIZATION_ENABLED', false),
     apiKey: optional('ANTHROPIC_API_KEY', ''),
     model: optional('ANTHROPIC_MODEL', 'claude-haiku-4-5'),
   },

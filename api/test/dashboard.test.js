@@ -198,3 +198,37 @@ test('буруу category PATCH → 400', async () => {
 test('auth байхгүй → 401', async () => {
   assert.equal((await fetch(`${baseUrl}/api/summary`)).status, 401);
 });
+
+// ---- AI СОНГОЛТТОЙ (optional) — тусдаа app instance ----
+async function spinApp(ai) {
+  const d = createDb(':memory:');
+  const app = createApp({ db: d, ai, apiKey: API_KEY, rateLimit: { windowSeconds: 60, max: 100000 } });
+  const srv = await new Promise((r) => { const s = app.listen(0, () => r(s)); });
+  return { d, srv, url: `http://127.0.0.1:${srv.address().port}` };
+}
+const ingest = (url, mid2, desc) => fetch(`${url}/api/transactions`, {
+  method: 'POST', headers: H,
+  body: JSON.stringify({ messageId: mid2, amount: 5000, currency: 'MNT', date: '2026-06-08', type: 'expense', description: desc }),
+});
+
+test('AI ИДЭВХГҮЙ: танигдаагүй → pending, санал null, систем зогсохгүй', async () => {
+  const { d, srv, url } = await spinApp({ enabled: false, aiCategorize: async () => { throw new Error('дуудагдах ёсгүй'); } });
+  const res = await ingest(url, '<ai-off>', '0930 ZZUNKNOWNAI');
+  assert.equal(res.status, 201);
+  assert.equal((await res.json()).txStatus, 'pending_review');
+  const row = d.getByMessageId('<ai-off>');
+  assert.equal(row.category, null);
+  assert.equal(row.ai_suggested_category, null);
+  await new Promise((r) => srv.close(r)); d.close();
+});
+
+test('AI АЛДАА (credit алга): throw → гүйлгээ pending, санал null (зогсохгүй)', async () => {
+  const { d, srv, url } = await spinApp({ enabled: true, aiCategorize: async () => { throw new Error('credit алга'); } });
+  const res = await ingest(url, '<ai-fail>', '0930 ZZUNKNOWNFAIL');
+  assert.equal(res.status, 201);
+  assert.equal((await res.json()).txStatus, 'pending_review');
+  const row = d.getByMessageId('<ai-fail>');
+  assert.equal(row.category, null);
+  assert.equal(row.ai_suggested_category, null);
+  await new Promise((r) => srv.close(r)); d.close();
+});

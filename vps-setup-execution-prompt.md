@@ -10,6 +10,8 @@ AWS EC2 instance бэлэн (Ubuntu 24.04, t2.micro, 1GB RAM). Голомт ба
 - Key: `~/.ssh/bank-key.pem` (chmod 400 хийсэн байх)
 - SSH команд: `ssh -i ~/.ssh/bank-key.pem ubuntu@54.253.54.63`
 
+**Гүйцэтгэх арга:** Хэрэглэгч терминал нээж чадахгүй тул **code agent SSH-ээр серверт холбогдож командуудыг ажиллуулна**. Агент `~/.ssh/bank-key.pem` key-ээр холбогдоно. Key-г аюулгүй орчинд хадгалах, гадагш гаргахгүй. Хэрэглэгчийн оролцоо шаардлагатай алхмууд (Google зөвшөөрөл, GitHub нэвтрэлт, нууц утга оруулах, DuckDNS бүртгэл)-д агент тодорхой зааварчилж, хүлээнэ.
+
 **Чухал онцлог:**
 - `node:sqlite` ашигладаг тул **Node 24+ ЗААВАЛ** (Node 18/20 ажиллахгүй).
 - 1GB RAM тул dashboard build хийхэд санах ой дүүрч магадгүй → **swap файл нэмэх** эсвэл build-ийг локалд хийж хуулах.
@@ -54,10 +56,12 @@ AWS EC2 instance бэлэн (Ubuntu 24.04, t2.micro, 1GB RAM). Голомт ба
 - Nginx: `sudo apt install -y nginx`.
 - git: `sudo apt install -y git`.
 
-### Алхам 3: Код татах
-- Кодыг Git-ээс clone (хувийн repo бол deploy token/key) эсвэл `scp`-ээр хуулах.
-- listener + API хэсэгт `npm install --production`.
+### Алхам 3: Код татах (GitHub-аас)
+- Код одоо GitHub private repo-д байгаа. Серверт `git clone`-оор татна.
+- Хувийн repo тул серверт нэвтрэлт хэрэгтэй: PAT (HTTPS) эсвэл deploy key (SSH). Хэрэглэгчээс repo URL болон нэвтрэлтийн аргыг асуу. Нууц утгыг (PAT) log-д хэвлэхгүй.
+- Clone хийсний дараа listener + API хэсэгт `npm install --production`.
 - **Dashboard build:** 1GB RAM тул build санах ой дүүргэж магадгүй. Swap байгаа тул оролдоод, амжилтгүй бол хэрэглэгчид "локалд build хийж `dist/`-ийг scp-ээр хуул" гэж зөвлө.
+- Код шинэчлэхэд цаашид `git pull` хийхэд л болно (scp шаардлагагүй).
 
 ### Алхам 4: .env тохируулах (хэрэглэгчтэй)
 - listener болон API-ийн `.env` файлуудын **бүтцийг** үүсгэ (хувьсагчийн нэрсээр, утгагүй эсвэл placeholder-той).

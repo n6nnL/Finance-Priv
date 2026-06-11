@@ -123,9 +123,15 @@ RATE_LIMIT_WINDOW_SECONDS=60
 RATE_LIMIT_MAX=1000
 BODY_LIMIT=100kb
 LOG_LEVEL=info
-ANTHROPIC_API_KEY=sk-ant-...     # AI ангилалд (хүчинтэй key)
+AI_CATEGORIZATION_ENABLED=false  # AI СОНГОЛТТОЙ — default унтраалттай
+ANTHROPIC_API_KEY=               # credit нэмсэн үед бөглөнө
 ANTHROPIC_MODEL=claude-haiku-4-5
 ```
+
+> **AI ангилал СОНГОЛТТОЙ (default унтраалттай).** AI-гүйгээр систем бүрэн ажиллана —
+> танигдаагүй гүйлгээ саналгүйгээр `pending_review` болж хэрэглэгчээс асуугдана.
+> **Дараа AI залгах:** (1) Anthropic credit нэмэх → (2) `ANTHROPIC_API_KEY` тавих →
+> (3) `AI_CATEGORIZATION_ENABLED=true` → (4) `pm2 restart bank-api`.
 
 ```bash
 # Шинэ түлхүүр үүсгэх (хоёр .env-д ижлийг тавь):

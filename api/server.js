@@ -10,7 +10,7 @@ import { createAi } from './ai.js';
 import { logger } from './logger.js';
 
 const db = createDb(config.dbPath);
-const ai = createAi({ apiKey: config.ai.apiKey, model: config.ai.model });
+const ai = createAi({ apiKey: config.ai.apiKey, model: config.ai.model, enabled: config.ai.enabled });
 
 const app = createApp({
   db,
