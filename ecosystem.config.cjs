@@ -45,5 +45,14 @@ module.exports = {
       output: path.join(root, 'logs', 'api-out.log'),
       error: path.join(root, 'logs', 'api-err.log'),
     },
+    {
+      ...common,
+      name: 'bank-discord', // Discord мэдэгдэл + товч/modal-аар ангилах bot
+      script: path.join(root, 'discord', 'bot.js'),
+      cwd: path.join(root, 'discord'),
+      max_memory_restart: '250M',
+      output: path.join(root, 'logs', 'discord-out.log'),
+      error: path.join(root, 'logs', 'discord-err.log'),
+    },
   ],
 };
