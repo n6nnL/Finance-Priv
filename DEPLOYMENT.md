@@ -308,3 +308,37 @@ pm2 reload all
 | Dashboard 401 | API key буруу — `.env` хоёрын түлхүүр таарч байгаа эсэх |
 | AI санал "тодорхойгүй" | `ANTHROPIC_API_KEY` буруу/хоосон — хүчинтэй key тавь |
 | Catch-up үед олон push_failed | API унтраалттай байсан — `pm2 logs bank-api`, дараа `node scripts/repush.js` |
+
+---
+
+## Discord bot deploy (bank-discord)
+
+```bash
+cd ~/bank && git pull                      # код шинэчлэх (deploy key)
+cd ~/bank/discord && npm install --omit=dev
+# ~/bank/.env-д DISCORD_BOT_TOKEN, DISCORD_CHANNEL_ID нэмэх (нууц — гараар)
+cd ~/bank && pm2 start ecosystem.config.cjs --only bank-discord && pm2 save
+pm2 logs bank-discord                       # "нэвтэрлээ" + "backlog алгасч id>N"
+```
+> Bot анх асахдаа тухайн агшны max id-ээс эхэлдэг тул **хуучин гүйлгээ Discord-д
+> spam болохгүй** — зөвхөн deploy-ийн дараах ШИНЭ гүйлгээ мэдэгдэл болно. Discord-оос
+> ангилсан нь dashboard-той ижил DB-д тусна. Дэлгэрэнгүй: [`../discord/README.md`](../discord/README.md).
+
+## Гаднаас нэвтрэх — DuckDNS + Nginx + HTTPS
+
+1. **AWS Security Group:** Console → EC2 → instance → Security → Inbound rules →
+   **80 (HTTP), 443 (HTTPS), source 0.0.0.0/0** нэмэх (SSH 22 хэвээр). Үүнгүйгээр
+   гаднаас хандахгүй (AWS firewall, ufw-ээс тусдаа).
+2. **DuckDNS:** дэд домейн → серверийн IP-д заах. IP авто-шинэчлэх cron:
+   [`deploy/duckdns-update.sh.example`](deploy/duckdns-update.sh.example)-г серверт
+   хуулж, token бөглөж, `chmod 700`, `*/5 * * * *` cron (token git-д ОРОХГҮЙ).
+3. **Nginx:** [`deploy/nginx-bank.conf`](deploy/nginx-bank.conf)-ийн дагуу
+   `server_name <домейн>` → `proxy_pass :3000`. `nginx -t && systemctl reload nginx`.
+4. **HTTPS:** `sudo apt install -y certbot python3-certbot-nginx` →
+   `sudo certbot --nginx -d <домейн>.duckdns.org` (HTTP→HTTPS redirect зөвшөөр).
+   ⚠️ Урьдчилсан нөхцөл: AWS SG 80/443 нээгдсэн, домейн IP-д зөв заасан, Nginx ажиллаж байх.
+   `sudo certbot renew --dry-run` — авто-renew тест.
+5. **Утаснаас нэвтрэх:** `https://<домейн>.duckdns.org` → API key-ээр нэвтэрнэ.
+
+> **Энэ суулгацын домейн:** `https://golomt-fin.duckdns.org` (HTTPS — AWS SG нээж,
+> certbot ажиллуулсны дараа идэвхжинэ).

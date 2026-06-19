@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# ============================================================
+#  deploy/duckdns-update.sh.example — DuckDNS IP авто-шинэчлэлт (загвар)
+#
+#  Серверт хуулж, бодит утга бөглөнө (token ХЭЗЭЭ Ч git-д орохгүй):
+#    mkdir -p ~/duckdns && cp .../duckdns-update.sh.example ~/duckdns/update.sh
+#    nano ~/duckdns/update.sh        # <SUBDOMAIN>, <DUCKDNS_TOKEN> бөглөх
+#    chmod 700 ~/duckdns/update.sh
+#    crontab -e:
+#      */5 * * * * /home/ubuntu/duckdns/update.sh
+# ============================================================
+curl -fsS "https://www.duckdns.org/update?domains=<SUBDOMAIN>&token=<DUCKDNS_TOKEN>&ip=" \
+  -o ~/duckdns/last.txt 2>/dev/null
