@@ -8,7 +8,7 @@ import express from 'express';
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createAuth } from './middleware/auth.js';
+import { createAuth, createLoginHandler } from './middleware/auth.js';
 import { createRateLimit } from './middleware/rateLimit.js';
 import { createTransactionsRouter } from './routes/transactions.js';
 import { createMetaRouter } from './routes/meta.js';
@@ -34,6 +34,8 @@ export function createApp(deps) {
     hmacSecret = '',
     bodyLimit = '100kb',
     rateLimit = { windowSeconds: 60, max: 120 },
+    dashboardUser = 'admin',
+    dashboardPassword = '',
   } = deps;
 
   const app = express();
@@ -55,10 +57,13 @@ export function createApp(deps) {
   // Эрүүл мэндийн шалгалт (auth-гүй)
   app.get('/health', (_req, res) => res.status(200).json({ status: 'ok' }));
 
-  // Rate limit → Auth → routes (бүх /api auth-аар хамгаалагдсан)
   const rateLimitMw = createRateLimit(rateLimit);
-  const authMw = createAuth({ apiKey, hmacSecret });
+  const authMw = createAuth({ apiKey, hmacSecret, dashboardUser, dashboardPassword });
 
+  // Нэвтрэх (auth ШААРДАХГҮЙ) — admin/нууц үг → dashboard token. Rate limit-тэй.
+  app.post('/api/login', rateLimitMw, createLoginHandler({ apiKey, user: dashboardUser, password: dashboardPassword }));
+
+  // Бусад бүх /api — auth-аар хамгаалагдсан
   app.use('/api/transactions', rateLimitMw, authMw, createTransactionsRouter({ db, ai }));
   app.use('/api', rateLimitMw, authMw, createMetaRouter({ db, ai }));
 

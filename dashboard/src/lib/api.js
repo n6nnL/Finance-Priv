@@ -52,6 +52,23 @@ function qs(params = {}) {
   return s ? '?' + s : '';
 }
 
+// Нэвтрэх: хэрэглэгчийн нэр/нууц үг → dashboard token (localStorage-д хадгална)
+export async function login(username, password) {
+  const res = await fetch('/api/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || !json.token) {
+    const e = new Error(json.error || `HTTP ${res.status}`);
+    e.status = res.status;
+    throw e;
+  }
+  setApiKey(json.token);
+  return true;
+}
+
 export const api = {
   transactions: (filters) => req('/api/transactions' + qs(filters)),
   pending: (p) => req('/api/transactions/pending' + qs(p)),

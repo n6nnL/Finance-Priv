@@ -35,31 +35,67 @@ function extractKey(req) {
 }
 
 /**
- * Auth middleware factory.
- * @param {{ apiKey: string, hmacSecret?: string }} opts
+ * Dashboard session token — API key-ээс HMAC-аар гаргана. Хэрэглэгчийн нэр/нууц
+ * үг зөв бол энэ token-г буцаана. Бодит API key browser-т хэзээ ч гарахгүй.
  */
-export function createAuth({ apiKey, hmacSecret }) {
+export function dashboardToken(apiKey, user, password) {
+  if (!apiKey || !password) return null;
+  return createHmac('sha256', apiKey).update(`dash|${user}|${password}`).digest('hex');
+}
+
+/**
+ * Auth middleware factory.
+ * Хүлээн авах key: (a) LISTENER_API_KEY (listener/discord — машин хооронд) эсвэл
+ * (b) dashboard session token (browser, нэвтэрсний дараа).
+ * @param {{ apiKey: string, hmacSecret?: string, dashboardUser?: string, dashboardPassword?: string }} opts
+ */
+export function createAuth({ apiKey, hmacSecret, dashboardUser, dashboardPassword }) {
+  const dashToken = dashboardToken(apiKey, dashboardUser, dashboardPassword);
   return function auth(req, res, next) {
-    // 1) API key
     const provided = extractKey(req);
-    if (!provided || !safeEqual(provided, apiKey)) {
-      logger.warn('Auth амжилтгүй — API key буруу/байхгүй', { ip: req.ip, path: req.path });
+    if (!provided) {
+      logger.warn('Auth амжилтгүй — key байхгүй', { ip: req.ip, path: req.path });
       return res.status(401).json({ status: 'error', error: 'Unauthorized' });
     }
 
-    // 2) HMAC (тохируулсан бол)
+    // (b) Dashboard token — HMAC шаардахгүй
+    if (dashToken && safeEqual(provided, dashToken)) return next();
+
+    // (a) Listener/discord API key
+    if (!safeEqual(provided, apiKey)) {
+      logger.warn('Auth амжилтгүй — key буруу', { ip: req.ip, path: req.path });
+      return res.status(401).json({ status: 'error', error: 'Unauthorized' });
+    }
+    // API key мөн бол HMAC (тохируулсан үед body гарын үсэг)
     if (hmacSecret) {
       const sig = req.get('x-signature');
-      // req.rawBody-г app.js-ийн express.json verify-д хадгална
       const body = req.rawBody ?? Buffer.from(JSON.stringify(req.body ?? {}));
       const expected = createHmac('sha256', hmacSecret).update(body).digest('hex');
       if (!sig || !safeEqual(sig, expected)) {
-        logger.warn('Auth амжилтгүй — HMAC гарын үсэг таарахгүй', { ip: req.ip });
+        logger.warn('Auth амжилтгүй — HMAC таарахгүй', { ip: req.ip });
         return res.status(401).json({ status: 'error', error: 'Invalid signature' });
       }
     }
-
     return next();
+  };
+}
+
+/**
+ * Нэвтрэх handler factory: POST /api/login { username, password }.
+ * Зөв бол dashboard token буцаана. (auth ШААРДАХГҮЙ маршрут.)
+ */
+export function createLoginHandler({ apiKey, user, password }) {
+  return function login(req, res) {
+    if (!password) {
+      return res.status(503).json({ status: 'error', error: 'Нэвтрэлт тохируулаагүй (DASHBOARD_PASSWORD)' });
+    }
+    const u = String(req.body?.username ?? '');
+    const p = String(req.body?.password ?? '');
+    if (!safeEqual(u, user) || !safeEqual(p, password)) {
+      logger.warn('Login амжилтгүй', { ip: req.ip });
+      return res.status(401).json({ status: 'error', error: 'Нэр эсвэл нууц үг буруу' });
+    }
+    return res.status(200).json({ status: 'ok', token: dashboardToken(apiKey, user, password) });
   };
 }
 

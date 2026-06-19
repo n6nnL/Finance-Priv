@@ -19,6 +19,8 @@ const app = createApp({
   hmacSecret: config.hmacSecret,
   bodyLimit: config.bodyLimit,
   rateLimit: config.rateLimit,
+  dashboardUser: config.dashboard.user,
+  dashboardPassword: config.dashboard.password,
 });
 
 const server = app.listen(config.port, () => {

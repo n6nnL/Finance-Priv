@@ -59,6 +59,11 @@ export const config = {
   },
   bodyLimit: optional('BODY_LIMIT', '100kb'),
   logLevel: optional('LOG_LEVEL', 'info'),
+  // Dashboard нэвтрэлт (хэрэглэгчийн нэр/нууц үг). Password .env-д (git-д орохгүй).
+  dashboard: {
+    user: optional('DASHBOARD_USER', 'admin'),
+    password: optional('DASHBOARD_PASSWORD', ''),
+  },
   ai: {
     // AI ангилал СОНГОЛТТОЙ. Идэвхтэй болохын тулд toggle=true БА key байх ёстой.
     // Default: унтраалттай (хэрэглэгч одоогоор credit-гүй). AI-гүй үед танигдаагүй
