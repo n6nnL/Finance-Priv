@@ -1,121 +1,177 @@
 import { useState } from 'react';
-import { money, catLabel, catColor, confLabel, confColor, displayDesc, dateLabel } from '../lib/format.js';
+import { money, catLabel, catEmoji, catHex, hexTint, displayDesc } from '../lib/format.js';
 import { api } from '../lib/api.js';
 
-// Баталгаажуулах хүлээж буй (pending_review) гүйлгээ.
-// Гүйлгээний ТӨРЛӨӨС хамаарч өөр асуулт:
-//   POS (is_pos=1)      → "Ямар газар вэ?" → Газрын нэр (merchant_place)
-//   Шилжүүлэг/Төлбөр    → "Яагаад хийсэн бэ?" → Шалтгаан (note)
-export default function PendingReview({ items, categories, onConfirmed }) {
-  if (!items.length) {
-    return <div className="bg-white rounded-xl shadow p-8 text-center text-slate-400">Баталгаажуулах гүйлгээ алга 🎉</div>;
-  }
+// Inline pending banner — shows at top of txn page
+export default function PendingReview({ items, total, categories, onConfirmed }) {
+  const [editingId, setEditingId] = useState(null);
+
+  if (!items.length && !total) return null;
+
+  const editItem = items.find(t => t.id === editingId);
+
   return (
-    <div className="space-y-3">
-      {items.map((t) => (
-        <PendingRow key={t.id} t={t} categories={categories} onConfirmed={onConfirmed} />
-      ))}
-    </div>
+    <>
+      <div style={{ background: 'linear-gradient(135deg,#FFF6E9,#FFEFD6)', border: '1.5px solid #F4DDB0', borderRadius: 18, padding: '18px 20px', marginBottom: 22 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+          <div style={{ width: 32, height: 32, borderRadius: 10, background: '#F0A93C', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16 }}>⚡</div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 600, fontSize: 15, color: '#8A5A12' }}>
+              {total} гүйлгээ ангилахыг хүлээж байна
+            </div>
+            <div style={{ fontSize: 13, color: '#A87C36' }}>Систем автоматаар барьлаа — та зөвхөн баталгаажуулна уу</div>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+          {items.map(t => (
+            <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 13, background: '#FFFDF9', border: '1px solid #F1E4CC', borderRadius: 13, padding: '12px 14px' }}>
+              <div style={{ width: 38, height: 38, borderRadius: 11, background: '#F3ECDD', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>
+                {t.ai_suggested_category ? catEmoji(t.ai_suggested_category) : '🔔'}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 600, fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{displayDesc(t)}</div>
+                <div style={{ fontSize: 12, color: '#A39A8A' }}>{t.txn_date}{t.account_last4 ? ` · ••${t.account_last4}` : ''}</div>
+              </div>
+              <div style={{ fontFamily: 'Rubik', fontWeight: 600, fontSize: 15, color: t.type === 'income' ? '#2E9E5B' : '#D8483B', whiteSpace: 'nowrap' }}>
+                {t.type === 'income' ? '+' : '−'}{money(t.amount)}
+              </div>
+              <button
+                onClick={() => setEditingId(t.id)}
+                style={{ border: 'none', background: '#1F7A6B', color: '#fff', fontFamily: 'Onest', fontWeight: 600, fontSize: 13, padding: '9px 15px', borderRadius: 10, cursor: 'pointer', whiteSpace: 'nowrap' }}
+              >
+                Ангилах
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {editItem && (
+        <ConfirmModal
+          t={editItem}
+          categories={categories}
+          onClose={() => setEditingId(null)}
+          onSaved={(t, cat) => { setEditingId(null); onConfirmed(t, cat); }}
+        />
+      )}
+    </>
   );
 }
 
-function PendingRow({ t, categories, onConfirmed }) {
+function ConfirmModal({ t, categories, onClose, onSaved }) {
   const isPos = t.is_pos === 1;
-  const suggestion = t.ai_suggested_category;
-  const hasSuggestion = suggestion && suggestion !== 'other';
-
-  const [cat, setCat] = useState(hasSuggestion ? suggestion : 'other');
-  const [place, setPlace] = useState(t.merchant_place || t.friendly_name || '');
-  const [note, setNote] = useState(t.note || t.override_note || '');
-  const [applyAll, setApplyAll] = useState(true);
+  const suggest = t.ai_suggested_category;
+  const [cat, setCat] = useState(null);
+  const [note, setNote] = useState(t.note || '');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
 
-  async function confirm(useCat) {
+  async function save() {
+    if (!cat) return;
     setBusy(true); setErr('');
     try {
-      const extra = isPos ? { merchantPlace: place.trim() } : { note: note.trim() };
-      const r = await api.patchCategory(t.id, { category: useCat, applyToAll: applyAll, ...extra });
-      onConfirmed(t, useCat, r.updated || 1);
+      const extra = isPos ? { merchantPlace: note.trim() } : { note: note.trim() };
+      await api.patchCategory(t.id, { category: cat, applyToAll: true, ...extra });
+      onSaved(t, cat);
     } catch (e) {
-      setErr(e.message || 'Алдаа');
+      setErr(e.message || 'Алдаа гарлаа');
       setBusy(false);
     }
   }
 
+  const disabled = !cat || busy;
+
   return (
-    <div className="bg-white rounded-xl shadow p-4">
-      {/* Толгой: төрөл badge + тайлбар + дүн */}
-      <div className="flex justify-between items-start gap-3">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <span className={`text-xs px-2 py-0.5 rounded-full ${isPos ? 'bg-teal-100 text-teal-700' : 'bg-violet-100 text-violet-700'}`}>
-              {isPos ? '🏪 POS' : '↔ Шилжүүлэг/Төлбөр'}
-            </span>
+    <div
+      onClick={onClose}
+      style={{ position: 'fixed', inset: 0, background: 'rgba(42,39,34,.42)', backdropFilter: 'blur(3px)', zIndex: 50, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{ background: '#FFFDF9', width: '100%', maxWidth: 480, borderRadius: '24px 24px 0 0', maxHeight: '92vh', overflowY: 'auto', boxShadow: '0 -10px 40px rgba(0,0,0,.18)' }}
+      >
+        {/* Modal header */}
+        <div style={{ padding: '20px 22px 14px', position: 'sticky', top: 0, background: '#FFFDF9', borderBottom: '1px solid #F2EADC', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div>
+            <div style={{ fontFamily: 'Rubik', fontWeight: 600, fontSize: 18 }}>Гүйлгээ баталгаажуулах</div>
+            <div style={{ fontSize: 12.5, color: '#A39A8A', marginTop: 2 }}>Систем барьсан — ангилаад хадгал</div>
           </div>
-          <div className="font-medium truncate mt-1" title={t.description}>{displayDesc(t)}</div>
-          <div className="text-xs text-slate-500 mt-0.5 flex flex-wrap gap-x-2">
-            <span>📅 {dateLabel(t.txn_date)}{t.txn_date ? ` · ${t.txn_date}` : ''}</span>
-            {t.account_last4 && <span>· 💳 ••{t.account_last4}</span>}
+          <button onClick={onClose} style={{ width: 32, height: 32, border: 'none', background: '#F2EADC', borderRadius: '50%', cursor: 'pointer', fontSize: 16, color: '#8C8578', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
+        </div>
+
+        <div style={{ padding: '20px 22px 24px' }}>
+          {/* Transaction preview */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 13, background: '#FBF6EC', border: '1px solid #F0E6D4', borderRadius: 14, padding: '14px 16px', marginBottom: 22 }}>
+            <div style={{ width: 46, height: 46, borderRadius: 13, background: cat ? hexTint(catHex(cat), 0.15) : '#F3ECDD', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22 }}>
+              {cat ? catEmoji(cat) : '🔔'}
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 600, fontSize: 15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{displayDesc(t)}</div>
+              <div style={{ fontSize: 12.5, color: '#A39A8A' }}>{t.txn_date}{t.account_last4 ? ` · ••${t.account_last4}` : ''}</div>
+            </div>
+            <div style={{ fontFamily: 'Rubik', fontWeight: 600, fontSize: 18, color: t.type === 'income' ? '#2E9E5B' : '#D8483B', flexShrink: 0 }}>
+              {t.type === 'income' ? '+' : '−'}{money(t.amount)}
+            </div>
+          </div>
+
+          {/* Note input */}
+          <label style={{ display: 'block', fontSize: 13, fontWeight: 500, color: '#6E665A', marginBottom: 7 }}>
+            {isPos ? 'Газрын нэр' : 'Юунд зарцуулсан бэ?'}
+          </label>
+          <input
+            value={note}
+            onChange={e => setNote(e.target.value)}
+            placeholder={isPos ? 'ж: Тэнгис кино театр' : 'ж: Ээжийн сарын мөнгө'}
+            style={{ width: '100%', height: 48, padding: '0 15px', border: '1.5px solid #E3DACB', borderRadius: 13, background: '#fff', fontFamily: 'Onest', fontSize: 15, color: '#2A2722', outline: 'none', marginBottom: 22, boxSizing: 'border-box' }}
+          />
+
+          {/* Category chips */}
+          <label style={{ display: 'block', fontSize: 13, fontWeight: 500, color: '#6E665A', marginBottom: 10 }}>Ангилал сонгох</label>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 8, marginBottom: 24 }}>
+            {categories.map(c => {
+              const sel = cat === c;
+              const isSug = !cat && c === suggest;
+              const hex = catHex(c);
+              return (
+                <button
+                  key={c}
+                  onClick={() => setCat(c)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 9,
+                    padding: '11px 12px',
+                    border: `1.5px solid ${sel ? hex : isSug ? 'rgba(240,169,60,.55)' : '#EFE6D6'}`,
+                    background: sel ? hexTint(hex, 0.14) : isSug ? 'rgba(240,169,60,.08)' : '#FFFDF9',
+                    borderRadius: 13, cursor: 'pointer',
+                    fontFamily: 'Onest', fontSize: 13.5, fontWeight: sel ? 600 : 500,
+                    color: sel ? hex : '#4A453D', textAlign: 'left',
+                  }}
+                >
+                  <span style={{ fontSize: 17, flexShrink: 0 }}>{catEmoji(c)}</span>
+                  <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{catLabel(c)}</span>
+                  {isSug && <span style={{ fontSize: 13, color: '#F0A93C', flexShrink: 0 }}>★</span>}
+                </button>
+              );
+            })}
+          </div>
+
+          {err && <div style={{ color: '#D8483B', fontSize: 13, marginBottom: 12 }}>{err}</div>}
+
+          {/* Buttons */}
+          <div style={{ display: 'flex', gap: 11 }}>
+            <button onClick={onClose} style={{ flexShrink: 0, padding: '0 20px', height: 52, border: '1.5px solid #E3DACB', background: '#fff', borderRadius: 14, fontFamily: 'Onest', fontWeight: 600, fontSize: 15, color: '#6E665A', cursor: 'pointer' }}>
+              Болих
+            </button>
+            <button
+              onClick={save}
+              disabled={disabled}
+              style={{ flex: 1, height: 52, border: 'none', borderRadius: 14, background: disabled ? '#E7DECF' : '#1F7A6B', color: disabled ? '#B7AD9C' : '#fff', fontFamily: 'Onest', fontWeight: 600, fontSize: 16, cursor: disabled ? 'not-allowed' : 'pointer' }}
+            >
+              {busy ? 'Хадгалж байна...' : !cat ? 'Ангилал сонгоно уу' : 'Баталгаажуулах'}
+            </button>
           </div>
         </div>
-        <div className={`font-semibold whitespace-nowrap ${t.type === 'income' ? 'text-green-600' : 'text-red-600'}`}>
-          {t.type === 'income' ? '+' : '-'}{money(t.amount)}
-        </div>
       </div>
-
-      {/* Төрөл-мэдрэмжтэй асуулт */}
-      <div className="mt-3 text-sm text-slate-700">
-        {isPos ? 'Энэ POS гүйлгээ. Ямар газар вэ?' : 'Энэ шилжүүлэг/төлбөр. Яагаад хийсэн бэ? Хэнд, юунд?'}
-      </div>
-
-      {/* AI санал — ЗӨВХӨН санал байгаа үед харуулна (AI-гүй үед огт харагдахгүй) */}
-      {hasSuggestion && (
-        <div className="mt-1.5 flex items-center gap-2 text-sm">
-          <span className="text-slate-500">AI санал:</span>
-          <span className={`text-xs px-2 py-0.5 rounded-full ${catColor(suggestion)}`}>{catLabel(suggestion)}</span>
-          <span className={`text-xs px-2 py-0.5 rounded-full ${confColor(t.ai_confidence)}`}>{confLabel(t.ai_confidence)} итгэл</span>
-        </div>
-      )}
-
-      {/* Төрлөөс хамаарсан оролт */}
-      {isPos ? (
-        <div className="mt-3">
-          <label className="block text-xs text-slate-500 mb-1">Газрын нэр</label>
-          <input type="text" value={place} onChange={(e) => setPlace(e.target.value)} autoComplete="off"
-            placeholder='жишээ: "Шулуун дун"' className="w-full sm:w-72 border rounded-lg px-3 py-1.5 text-sm" />
-        </div>
-      ) : (
-        <div className="mt-3">
-          <label className="block text-xs text-slate-500 mb-1">Шалтгаан / тэмдэглэл</label>
-          <input type="text" value={note} onChange={(e) => setNote(e.target.value)} autoComplete="off"
-            placeholder='жишээ: "Ээжид сарын мөнгө"' className="w-full border rounded-lg px-3 py-1.5 text-sm" />
-        </div>
-      )}
-
-      {/* Үйлдэл */}
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <select value={cat} onChange={(e) => setCat(e.target.value)} className="border rounded-lg px-2 py-1.5 text-sm bg-white">
-          {categories.map((c) => <option key={c} value={c}>{catLabel(c)}</option>)}
-        </select>
-
-        {hasSuggestion && (
-          <button disabled={busy} onClick={() => confirm(suggestion)}
-            className="bg-green-600 text-white rounded-lg px-3 py-1.5 text-sm font-medium disabled:opacity-50">
-            ✓ AI саналыг зөвшөөрөх
-          </button>
-        )}
-        <button disabled={busy} onClick={() => confirm(cat)}
-          className="bg-indigo-600 text-white rounded-lg px-3 py-1.5 text-sm font-medium disabled:opacity-50">
-          Хадгалах
-        </button>
-
-        <label className="flex items-center gap-1 text-xs text-slate-600 ml-auto">
-          <input type="checkbox" checked={applyAll} onChange={(e) => setApplyAll(e.target.checked)} />
-          Энэ мерчантын бүгдэд хэрэглэх
-        </label>
-      </div>
-      {err && <div className="text-xs text-red-600 mt-2">{err}</div>}
     </div>
   );
 }

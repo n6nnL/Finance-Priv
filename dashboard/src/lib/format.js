@@ -1,5 +1,3 @@
-// 10 ангиллын систем — категори VALUE нь шууд монгол нэр (key биш).
-// 10 ангиллын өнгө:
 export const CATEGORY_COLORS = {
   'Гадуур хооллолт': 'bg-green-100 text-green-800',
   'Хүнсний зүйл': 'bg-lime-100 text-lime-800',
@@ -13,25 +11,54 @@ export const CATEGORY_COLORS = {
   'Бусад': 'bg-slate-200 text-slate-700',
 };
 
-// Хуучин (англи key) өгөгдөл үлдсэн бол шинэ нэр рүү харуулах fallback
 const OLD_KEY_TO_NEW = {
   food: 'Гадуур хооллолт', transport: 'Тээвэр', wallet: 'Захиалга & сервис',
   subscription: 'Захиалга & сервис', bills: 'Захиалга & сервис',
   transfer: 'Шилжүүлэг & гэр бүл', salary: 'Орлого', cash: 'Орлого', other: 'Бусад',
 };
 
+const CAT_META = {
+  'Гадуур хооллолт':           { emoji: '🍽️', hex: '#E8703A' },
+  'Хүнсний зүйл':              { emoji: '🛒', hex: '#4F9D69' },
+  'Тээвэр':                    { emoji: '🚗', hex: '#E0A33E' },
+  'Орлого':                    { emoji: '💰', hex: '#2E9E5B' },
+  'Шилжүүлэг & гэр бүл':      { emoji: '💸', hex: '#C2698F' },
+  'Захиалга & сервис':         { emoji: '📱', hex: '#3FA9A0' },
+  'Боловсрол':                  { emoji: '📚', hex: '#5566B5' },
+  'Чөлөөт цаг / зугаа цэнгэл': { emoji: '🎬', hex: '#8B6FB8' },
+  'Хувцас / гоо сайхан':      { emoji: '👕', hex: '#D86A92' },
+  'Эрүүл мэнд':                { emoji: '🏥', hex: '#D85A5A' },
+  'Ахуйн хэрэглээ':            { emoji: '🏠', hex: '#3E7CB1' },
+  'Амралт зугаалга':           { emoji: '✈️', hex: '#56AEBE' },
+  'Бусад':                      { emoji: '📦', hex: '#8A8275' },
+};
+
 export function catLabel(c) {
-  if (c == null) return 'Ангилаагүй'; // null = баталгаажаагүй (pending), "Бусад"-аас ялгаатай
-  return OLD_KEY_TO_NEW[c] || c; // шинэ нэр шууд, хуучин key бол буулгана
+  if (c == null) return 'Ангилаагүй';
+  return OLD_KEY_TO_NEW[c] || c;
 }
 export function catColor(c) {
   if (c == null) return 'bg-orange-100 text-orange-700';
   const name = OLD_KEY_TO_NEW[c] || c;
   return CATEGORY_COLORS[name] || 'bg-slate-200 text-slate-700';
 }
+export function catEmoji(c) {
+  if (c == null) return '⏳';
+  const name = OLD_KEY_TO_NEW[c] || c;
+  return CAT_META[name]?.emoji || '📦';
+}
+export function catHex(c) {
+  if (c == null) return '#F0A93C';
+  const name = OLD_KEY_TO_NEW[c] || c;
+  return CAT_META[name]?.hex || '#8A8275';
+}
+export function hexTint(hex, alpha) {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
 
-// Тайлбарыг харуулах: газрын нэр (merchant_place эсвэл override friendly_name)
-// байвал "Шулуун дун (ShuluBOM)"
 export function displayDesc(row) {
   const desc = row.description || '-';
   const place = row.merchant_place || row.friendly_name;
@@ -39,7 +66,6 @@ export function displayDesc(row) {
   return desc;
 }
 
-// Огноог уншигдахуйц болгох: "2026-06-07" → "6-р сарын 7"
 export function dateLabel(d) {
   if (!d) return '-';
   const m = String(d).match(/^(\d{4})-(\d{2})-(\d{2})/);

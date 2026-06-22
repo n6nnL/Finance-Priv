@@ -1,104 +1,117 @@
-import { useState } from 'react';
-import { catLabel } from '../lib/format.js';
+import { catLabel, catEmoji, catHex, hexTint } from '../lib/format.js';
 
-// Шүүлтүүр панел. Утсан дээр эвхэгддэг (collapsible).
 export default function Filters({ categories, value, onChange, onReset }) {
-  const [open, setOpen] = useState(false);
   const set = (patch) => onChange({ ...value, ...patch, offset: 0 });
 
   function toggleCat(c) {
     const cur = value.category || [];
-    const next = cur.includes(c) ? cur.filter((x) => x !== c) : [...cur, c];
+    const next = cur.includes(c) ? cur.filter(x => x !== c) : [...cur, c];
     set({ category: next });
   }
 
-  return (
-    <div className="bg-white rounded-xl shadow mb-4">
-      <button
-        className="w-full flex items-center justify-between px-4 py-3 sm:hidden"
-        onClick={() => setOpen((o) => !o)}
-      >
-        <span className="font-medium">Шүүлтүүр</span>
-        <span className="text-slate-400">{open ? '▲' : '▼'}</span>
-      </button>
+  const filtersActive = !!(value.q || value.type || (value.category || []).length || value.from || value.to || value.minAmount || value.maxAmount);
 
-      <div className={`${open ? 'block' : 'hidden'} sm:block p-4 pt-0 sm:pt-4`}>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          {/* Текст хайлт */}
-          <div className="lg:col-span-2">
-            <label className="block text-xs text-slate-500 mb-1">Хайлт (тайлбар)</label>
+  const inp = {
+    width: '100%', height: 46, padding: '0 13px',
+    border: '1.5px solid #E3DACB', borderRadius: 12,
+    background: '#fff', fontFamily: 'Onest', fontSize: 14,
+    color: '#2A2722', outline: 'none', boxSizing: 'border-box',
+  };
+  const lbl = { display: 'block', fontSize: 12.5, fontWeight: 500, color: '#6E665A', marginBottom: 6 };
+
+  return (
+    <div style={{ background: '#FFFDF9', border: '1px solid #EAE1D3', borderRadius: 18, padding: '18px 18px 16px', marginBottom: 18 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 14 }} className="grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
+        {/* Search */}
+        <div style={{ gridColumn: '1 / -1' }} className="lg:col-span-1">
+          <label style={lbl}>Хайлт (тайлбар)</label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#fff', border: '1.5px solid #E3DACB', borderRadius: 12, padding: '0 13px', height: 46 }}>
+            <span style={{ color: '#B0A696', fontSize: 15 }}>🔍</span>
             <input
-              type="text"
               value={value.q || ''}
-              onChange={(e) => set({ q: e.target.value })}
-              placeholder="жишээ: SocialPay, CU..."
-              className="w-full border rounded-lg px-3 py-2 text-sm"
+              onChange={e => set({ q: e.target.value })}
+              placeholder="жишээ: Veranda, Nomin..."
+              style={{ border: 'none', background: 'none', outline: 'none', fontFamily: 'Onest', fontSize: 14, flex: 1, color: '#2A2722', minWidth: 0 }}
             />
-          </div>
-          {/* Төрөл */}
-          <div>
-            <label className="block text-xs text-slate-500 mb-1">Төрөл</label>
-            <select
-              value={value.type || ''}
-              onChange={(e) => set({ type: e.target.value })}
-              className="w-full border rounded-lg px-3 py-2 text-sm bg-white"
-            >
-              <option value="">Бүгд</option>
-              <option value="expense">Зарлага</option>
-              <option value="income">Орлого</option>
-            </select>
-          </div>
-          {/* Огноо from */}
-          <div>
-            <label className="block text-xs text-slate-500 mb-1">Огноо (эхэлэх)</label>
-            <input type="date" value={value.from || ''} onChange={(e) => set({ from: e.target.value })}
-              className="w-full border rounded-lg px-3 py-2 text-sm" />
-          </div>
-          <div>
-            <label className="block text-xs text-slate-500 mb-1">Огноо (дуусах)</label>
-            <input type="date" value={value.to || ''} onChange={(e) => set({ to: e.target.value })}
-              className="w-full border rounded-lg px-3 py-2 text-sm" />
-          </div>
-          {/* Дүн min/max */}
-          <div>
-            <label className="block text-xs text-slate-500 mb-1">Дүн (доод)</label>
-            <input type="number" value={value.minAmount || ''} onChange={(e) => set({ minAmount: e.target.value })}
-              className="w-full border rounded-lg px-3 py-2 text-sm" />
-          </div>
-          <div>
-            <label className="block text-xs text-slate-500 mb-1">Дүн (дээд)</label>
-            <input type="number" value={value.maxAmount || ''} onChange={(e) => set({ maxAmount: e.target.value })}
-              className="w-full border rounded-lg px-3 py-2 text-sm" />
           </div>
         </div>
 
-        {/* Ангилал (олон сонголт) */}
-        <div className="mt-3">
-          <label className="block text-xs text-slate-500 mb-1">Ангилал</label>
-          <div className="flex flex-wrap gap-2">
-            {categories.map((c) => {
+        {/* Type */}
+        <div>
+          <label style={lbl}>Төрөл</label>
+          <select value={value.type || ''} onChange={e => set({ type: e.target.value })} style={inp}>
+            <option value="">Бүгд</option>
+            <option value="income">Орлого</option>
+            <option value="expense">Зарлага</option>
+          </select>
+        </div>
+
+        {/* Date from */}
+        <div>
+          <label style={lbl}>Огноо (эхлэх)</label>
+          <input type="date" value={value.from || ''} onChange={e => set({ from: e.target.value })} style={inp} />
+        </div>
+
+        {/* Date to */}
+        <div>
+          <label style={lbl}>Огноо (дуусах)</label>
+          <input type="date" value={value.to || ''} onChange={e => set({ to: e.target.value })} style={inp} />
+        </div>
+
+        {/* Amount min */}
+        <div>
+          <label style={lbl}>Дүн (доод)</label>
+          <input type="number" value={value.minAmount || ''} onChange={e => set({ minAmount: e.target.value })} placeholder="0₮" style={inp} />
+        </div>
+
+        {/* Amount max */}
+        <div>
+          <label style={lbl}>Дүн (дээд)</label>
+          <input type="number" value={value.maxAmount || ''} onChange={e => set({ maxAmount: e.target.value })} placeholder="Хязгааргүй" style={inp} />
+        </div>
+      </div>
+
+      {/* Category chips */}
+      {categories.length > 0 && (
+        <div style={{ marginTop: 16 }}>
+          <label style={lbl}>Ангилал</label>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {categories.map(c => {
               const active = (value.category || []).includes(c);
+              const hex = catHex(c);
               return (
                 <button
                   key={c}
                   onClick={() => toggleCat(c)}
-                  className={`px-3 py-1 rounded-full text-xs border ${
-                    active ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-300'
-                  }`}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 7,
+                    height: 36, padding: '0 13px',
+                    border: `1.5px solid ${active ? hex : '#EFE6D6'}`,
+                    background: active ? hexTint(hex, 0.13) : '#FFFDF9',
+                    borderRadius: 999, cursor: 'pointer',
+                    fontFamily: 'Onest', fontWeight: active ? 600 : 500,
+                    fontSize: 13, color: active ? hex : '#6E665A',
+                  }}
                 >
+                  <span style={{ fontSize: 15 }}>{catEmoji(c)}</span>
                   {catLabel(c)}
                 </button>
               );
             })}
           </div>
         </div>
+      )}
 
-        <div className="mt-3 flex justify-end">
-          <button onClick={onReset} className="text-sm text-slate-500 hover:text-slate-700 underline">
+      {filtersActive && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 14 }}>
+          <button
+            onClick={onReset}
+            style={{ border: 'none', background: 'none', cursor: 'pointer', fontFamily: 'Onest', fontSize: 13.5, fontWeight: 500, color: '#1F7A6B', textDecoration: 'underline', textUnderlineOffset: 3, padding: 4 }}
+          >
             Шүүлтүүр цэвэрлэх
           </button>
         </div>
-      </div>
+      )}
     </div>
   );
 }
