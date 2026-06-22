@@ -11,6 +11,14 @@ import Insights from './components/Insights.jsx';
 const PAGE = 50;
 const emptyFilters = { q: '', type: '', from: '', to: '', minAmount: '', maxAmount: '', category: [], limit: PAGE, offset: 0 };
 
+function thisMonthFilter() {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const last = new Date(y, now.getMonth() + 1, 0).getDate();
+  return { from: `${y}-${m}-01`, to: `${y}-${m}-${String(last).padStart(2, '0')}` };
+}
+
 const SECTIONS = [
   { key: 'txn',      label: 'Бүртгэл',   icon: '🧾' },
   { key: 'analyze',  label: 'Шинжилгээ', icon: '📊' },
@@ -46,12 +54,18 @@ export default function App() {
     api.categories().then(r => setCategories(r.categories)).catch(() => {});
   }, [authed]);
 
+  const loadSummary = useCallback(async () => {
+    try {
+      const s = await api.summary(thisMonthFilter());
+      setSummary(s);
+    } catch (e) { handle401(e); }
+  }, []);
+
   const loadTransactions = useCallback(async () => {
     setLoading(true); setError('');
     try {
-      const [t, s] = await Promise.all([api.transactions(filters), api.summary(filters)]);
+      const t = await api.transactions(filters);
       setList({ data: t.data, total: t.total, limit: t.limit, offset: t.offset });
-      setSummary(s);
     } catch (e) { if (!handle401(e)) setError(e.message); } finally { setLoading(false); }
   }, [filters]);
 
@@ -61,6 +75,11 @@ export default function App() {
       setPending({ data: p.data, total: p.total });
     } catch (e) { handle401(e); }
   }, []);
+
+  useEffect(() => {
+    if (!authed) return;
+    loadSummary();
+  }, [authed, loadSummary]);
 
   useEffect(() => {
     if (!authed || section !== 'txn') return;
@@ -74,6 +93,7 @@ export default function App() {
 
   function onConfirmed() {
     loadPending();
+    loadSummary();
     loadTransactions();
   }
 
