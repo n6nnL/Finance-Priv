@@ -21,12 +21,12 @@ import { logger } from './logger.js';
  * @param {object} args.db
  * @param {object} [args.ai]
  */
-export async function classifyTransaction({ description, type, db, ai }) {
+export async function classifyTransaction({ description, type, db, ai, userId }) {
   const norm = normalizeMerchant(description);
 
-  // 1) Learned override — эхэнд
+  // 1) Learned override — эхэнд (тухайн хэрэглэгчийнх)
   if (norm) {
-    for (const ov of db.getOverrides()) {
+    for (const ov of db.getOverrides(userId)) {
       if (ov.merchant_pattern && norm.includes(ov.merchant_pattern)) {
         return { category: ov.category, status: 'classified', aiSuggestedCategory: null, aiConfidence: null };
       }

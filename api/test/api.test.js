@@ -11,18 +11,22 @@ import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
 import { createDb } from '../db.js';
 import { createApp } from '../app.js';
+import { hashPasswordSync } from '../auth/passwordHash.js';
 
 const API_KEY = 'test-secret-key';
 let server;
 let baseUrl;
 let db;
+let OWNER;
 
 before(async () => {
   db = createDb(':memory:');
+  OWNER = db.createUser('admin', hashPasswordSync('x'), 'admin').id; // machine→owner
   const app = createApp({
     db,
     apiKey: API_KEY,
     hmacSecret: '', // HMAC-гүй үндсэн тестүүд
+    jwtSecret: 'test-secret',
     rateLimit: { windowSeconds: 60, max: 1000 },
   });
   await new Promise((resolve) => {
@@ -122,7 +126,7 @@ test('listener alias (direction/accountTail) → нормализаци хийж
   });
   assert.equal(res.status, 201);
   // DB-д зөв хадгалагдсан эсэхийг шалгана
-  const row = db.getByMessageId('<msg-alias>');
+  const row = db.getByMessageId(OWNER, '<msg-alias>');
   assert.equal(row.type, 'income');
   assert.equal(row.account_last4, '9999');
   assert.equal(row.raw, 'Цалин орлоо');
@@ -152,7 +156,8 @@ test('GET auth-гүй → 401', async () => {
 test('HMAC: зөв гарын үсэг → 201, буруу → 401', async () => {
   const HMAC = 'hmac-secret';
   const db2 = createDb(':memory:');
-  const app2 = createApp({ db: db2, apiKey: API_KEY, hmacSecret: HMAC });
+  db2.createUser('admin', hashPasswordSync('x'), 'admin');
+  const app2 = createApp({ db: db2, apiKey: API_KEY, hmacSecret: HMAC, jwtSecret: 'test-secret' });
   const srv2 = await new Promise((resolve) => {
     const s = app2.listen(0, () => resolve(s));
   });

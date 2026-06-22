@@ -8,10 +8,13 @@ import express from 'express';
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createAuth, createLoginHandler } from './middleware/auth.js';
+import { createAuth } from './middleware/auth.js';
 import { createRateLimit } from './middleware/rateLimit.js';
 import { createTransactionsRouter } from './routes/transactions.js';
 import { createMetaRouter } from './routes/meta.js';
+import { createAuthRouter, createMeHandler } from './routes/auth.js';
+import { createJwt } from './auth/jwt.js';
+import { createLocalProvider } from './auth/providers/local.js';
 import { logger } from './logger.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -34,8 +37,10 @@ export function createApp(deps) {
     hmacSecret = '',
     bodyLimit = '100kb',
     rateLimit = { windowSeconds: 60, max: 120 },
-    dashboardUser = 'admin',
-    dashboardPassword = '',
+    jwtSecret,
+    jwtAccessTtl = '30m',
+    jwtRefreshTtl = '30d',
+    allowRegister = false,
   } = deps;
 
   const app = express();
@@ -58,12 +63,17 @@ export function createApp(deps) {
   app.get('/health', (_req, res) => res.status(200).json({ status: 'ok' }));
 
   const rateLimitMw = createRateLimit(rateLimit);
-  const authMw = createAuth({ apiKey, hmacSecret, dashboardUser, dashboardPassword });
+  const jwt = createJwt({ secret: jwtSecret || apiKey, accessTtl: jwtAccessTtl, refreshTtl: jwtRefreshTtl });
+  const provider = createLocalProvider({ db });
+  const ownerUserId = db.getOwnerUserId(); // machine (API key) дуудлага хамаарах хэрэглэгч
+  const authMw = createAuth({ apiKey, hmacSecret, jwt, ownerUserId });
 
-  // Нэвтрэх (auth ШААРДАХГҮЙ) — admin/нууц үг → dashboard token. Rate limit-тэй.
-  app.post('/api/login', rateLimitMw, createLoginHandler({ apiKey, user: dashboardUser, password: dashboardPassword }));
+  // PUBLIC auth (register/login/refresh) — auth ШААРДАХГҮЙ, rate limit-тэй
+  app.use('/api/auth', rateLimitMw, createAuthRouter({ db, jwt, provider, allowRegister }));
+  // /api/auth/me — authed
+  app.get('/api/auth/me', rateLimitMw, authMw, createMeHandler({ db }));
 
-  // Бусад бүх /api — auth-аар хамгаалагдсан
+  // Бусад бүх /api — auth-аар хамгаалагдсан (JWT эсвэл machine API key)
   app.use('/api/transactions', rateLimitMw, authMw, createTransactionsRouter({ db, ai }));
   app.use('/api', rateLimitMw, authMw, createMetaRouter({ db, ai }));
 

@@ -59,10 +59,25 @@ export const config = {
   },
   bodyLimit: optional('BODY_LIMIT', '100kb'),
   logLevel: optional('LOG_LEVEL', 'info'),
-  // Dashboard нэвтрэлт (хэрэглэгчийн нэр/нууц үг). Password .env-д (git-д орохгүй).
+  // Dashboard нэвтрэлт (хуучин — seed admin-д ашиглана). Password .env-д.
   dashboard: {
     user: optional('DASHBOARD_USER', 'admin'),
     password: optional('DASHBOARD_PASSWORD', ''),
+  },
+  // JWT (token-д суурилсан хэрэглэгчийн нэвтрэлт). secret тогтвортой байх ёстой
+  // (солих бүрд бүх token хүчингүй болно). Default нь apiKey (тогтвортой, нууц).
+  jwt: {
+    secret: optional('JWT_SECRET', '') || required('LISTENER_API_KEY'),
+    accessTtl: optional('JWT_ACCESS_TTL', '30m'),
+    refreshTtl: optional('JWT_REFRESH_TTL', '30d'),
+  },
+  // Auth foundation
+  auth: {
+    // Анхны admin хэрэглэгч (users хоосон бол үүснэ). Login = энэ email/password.
+    seedEmail: optional('SEED_ADMIN_EMAIL', 'admin'),
+    seedPassword: optional('SEED_ADMIN_PASSWORD', '') || optional('DASHBOARD_PASSWORD', ''),
+    // Олон нийтэд нээлттэй бүртгэл (default OFF — одоо хувийн систем)
+    allowRegister: bool('AUTH_ALLOW_REGISTER', false),
   },
   ai: {
     // AI ангилал СОНГОЛТТОЙ. Идэвхтэй болохын тулд toggle=true БА key байх ёстой.

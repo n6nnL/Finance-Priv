@@ -7,7 +7,8 @@
       "PowerShell(npm --version)",
       "PowerShell($paths = @\\(\"$env:ProgramFiles\\\\nodejs\\\\node.exe\", \"${env:ProgramFiles\\(x86\\)}\\\\nodejs\\\\node.exe\", \"$env:LOCALAPPDATA\\\\Programs\\\\nodejs\\\\node.exe\", \"$env:APPDATA\\\\npm\\\\node.exe\"\\); foreach \\($p in $paths\\) { if \\(Test-Path $p\\) { Write-Output \"FOUND: $p\" } }; Get-Command node -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source)",
       "mcp__Claude_Preview__preview_start",
-      "PowerShell(Remove-Item \"$env:TEMP\\\\bank.tar.gz\" -ErrorAction SilentlyContinue; Write-Output \"temp tarball cleaned\")"
+      "PowerShell(Remove-Item \"$env:TEMP\\\\bank.tar.gz\" -ErrorAction SilentlyContinue; Write-Output \"temp tarball cleaned\")",
+      "Bash(cd /d/Claude/api && cat package.json | grep -A6 '\"dependencies\"')"
     ]
   }
 }

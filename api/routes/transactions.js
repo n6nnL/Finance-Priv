@@ -36,9 +36,10 @@ export function createTransactionsRouter({ db, ai }) {
         return res.status(400).json({ status: 'error', errors: result.errors });
       }
       const tx = result.data;
+      const userId = req.userId; // machine (API key) → owner; multi-tenant scope
 
       // 2) Давхардал шалгах (insert хийхээс өмнө — AI дуудлага дэмий хийхгүй)
-      const existing = db.getByMessageId(tx.messageId);
+      const existing = db.getByMessageId(userId, tx.messageId);
       if (existing) {
         logger.info('Давхардсан messageId — алгасав', { id: existing.id, messageId: tx.messageId });
         return res.status(200).json({ status: 'duplicate', id: Number(existing.id) });
@@ -50,6 +51,7 @@ export function createTransactionsRouter({ db, ai }) {
         type: tx.type,
         db,
         ai,
+        userId,
       });
 
       // 4) Insert (идэмпотентность: UNIQUE message_id, race-д найдвартай)
@@ -57,6 +59,7 @@ export function createTransactionsRouter({ db, ai }) {
       const isPos = tx.isPos == null ? isPosDescription(tx.description) : tx.isPos;
       const { created, id, row } = db.insertTransaction({
         ...tx,
+        userId,
         category: decision.category,
         status: decision.status,
         aiSuggestedCategory: decision.aiSuggestedCategory,
@@ -85,7 +88,7 @@ export function createTransactionsRouter({ db, ai }) {
       if (type && type !== 'expense' && type !== 'income') {
         return res.status(400).json({ status: 'error', error: "type нь 'expense' эсвэл 'income' байх ёстой" });
       }
-      const out = db.listTransactions({ from, to, category, type, q, minAmount, maxAmount, status, limit, offset });
+      const out = db.listTransactions(req.userId, { from, to, category, type, q, minAmount, maxAmount, status, limit, offset });
       return res.status(200).json({
         status: 'ok',
         total: out.total,
@@ -104,7 +107,7 @@ export function createTransactionsRouter({ db, ai }) {
   router.get('/pending', (req, res) => {
     try {
       const { limit, offset } = req.query;
-      const out = db.getPending({ limit, offset });
+      const out = db.getPending(req.userId, { limit, offset });
       return res.status(200).json({
         status: 'ok', total: out.total, limit: out.limit, offset: out.offset,
         count: out.rows.length, data: out.rows,
@@ -136,7 +139,7 @@ export function createTransactionsRouter({ db, ai }) {
       if (!valid.includes(category)) {
         return res.status(400).json({ status: 'error', error: `category нь дараахын нэг байх ёстой: ${valid.join(', ')}` });
       }
-      const row = db.getById(id);
+      const row = db.getById(req.userId, id);
       if (!row) return res.status(404).json({ status: 'error', error: 'Гүйлгээ олдсонгүй' });
 
       // Газрын нэр эсвэл note өгвөл мерчантынх тул applyToAll шиг сурна
@@ -147,11 +150,11 @@ export function createTransactionsRouter({ db, ai }) {
       let override = null;
       if (learn) {
         const pattern = db.normalizeMerchant(row.description);
-        updated = db.updateCategoryByPattern(pattern, category, extra);
+        updated = db.updateCategoryByPattern(req.userId, pattern, category, extra);
         // override: POS газрын нэр → friendly_name, шалтгаан → default_note
-        override = db.addOverride(pattern, category, merchantPlace || null, note || null);
+        override = db.addOverride(req.userId, pattern, category, merchantPlace || null, note || null);
       } else {
-        db.updateCategoryById(id, category, extra);
+        db.updateCategoryById(req.userId, id, category, extra);
       }
       logger.info('Баталгаажлаа', { id, category, applyToAll: learn, place: !!merchantPlace, note: !!note, updated });
       return res.status(200).json({ status: 'ok', id, category, updated, override });
@@ -166,10 +169,10 @@ export function createTransactionsRouter({ db, ai }) {
     try {
       const id = Number(req.params.id);
       if (!Number.isInteger(id)) return res.status(400).json({ status: 'error', error: 'буруу id' });
-      const row = db.getById(id);
+      const row = db.getById(req.userId, id);
       if (!row) return res.status(404).json({ status: 'error', error: 'Гүйлгээ олдсонгүй' });
       const note = (req.body?.note ?? '').toString();
-      db.updateNote(id, note);
+      db.updateNote(req.userId, id, note);
       return res.status(200).json({ status: 'ok', id, note: note.trim() || null });
     } catch (err) {
       logger.error('PATCH note алдаа', { err: err?.message });

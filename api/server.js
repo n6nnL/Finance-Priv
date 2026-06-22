@@ -7,9 +7,15 @@ import { config } from './config.js';
 import { createDb } from './db.js';
 import { createApp } from './app.js';
 import { createAi } from './ai.js';
+import { hashPasswordSync } from './auth/passwordHash.js';
 import { logger } from './logger.js';
 
-const db = createDb(config.dbPath);
+// Анхны admin-г seed хийх (users хоосон үед). Нууц үг hash хийгдэнэ.
+const seed = config.auth.seedPassword
+  ? { email: config.auth.seedEmail, passwordHash: hashPasswordSync(config.auth.seedPassword), role: 'admin' }
+  : undefined;
+
+const db = createDb(config.dbPath, { seed });
 const ai = createAi({ apiKey: config.ai.apiKey, model: config.ai.model, enabled: config.ai.enabled });
 
 const app = createApp({
@@ -19,8 +25,10 @@ const app = createApp({
   hmacSecret: config.hmacSecret,
   bodyLimit: config.bodyLimit,
   rateLimit: config.rateLimit,
-  dashboardUser: config.dashboard.user,
-  dashboardPassword: config.dashboard.password,
+  jwtSecret: config.jwt.secret,
+  jwtAccessTtl: config.jwt.accessTtl,
+  jwtRefreshTtl: config.jwt.refreshTtl,
+  allowRegister: config.auth.allowRegister,
 });
 
 const server = app.listen(config.port, () => {
@@ -28,6 +36,7 @@ const server = app.listen(config.port, () => {
     port: config.port,
     hmac: config.hmacSecret ? 'enabled' : 'disabled',
     ai: ai.enabled ? config.ai.model : 'disabled',
+    users: db.countUsers(),
     db: config.dbPath,
   });
 });

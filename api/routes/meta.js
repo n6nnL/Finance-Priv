@@ -20,10 +20,21 @@ export function createMetaRouter({ db, ai }) {
   router.get('/summary', (req, res) => {
     try {
       const { from, to, category, type, q, minAmount, maxAmount } = req.query;
-      const summary = db.getSummary({ from, to, category, type, q, minAmount, maxAmount });
+      const summary = db.getSummary(req.userId, { from, to, category, type, q, minAmount, maxAmount });
       return res.status(200).json({ status: 'ok', ...summary });
     } catch (err) {
       logger.error('GET /summary алдаа', { err: err?.message });
+      return res.status(500).json({ status: 'error', error: 'Internal Server Error' });
+    }
+  });
+
+  // ---- GET /api/monthly — сараар орлого/зарлага (Шинжилгээ хэсэгт) ----
+  router.get('/monthly', (req, res) => {
+    try {
+      const months = req.query.months;
+      return res.status(200).json({ status: 'ok', data: db.getMonthly(req.userId, { months }) });
+    } catch (err) {
+      logger.error('GET /monthly алдаа', { err: err?.message });
       return res.status(500).json({ status: 'error', error: 'Internal Server Error' });
     }
   });
@@ -53,9 +64,9 @@ export function createMetaRouter({ db, ai }) {
   });
 
   // ---- GET /api/overrides — learned override жагсаалт ----
-  router.get('/overrides', (_req, res) => {
+  router.get('/overrides', (req, res) => {
     try {
-      return res.status(200).json({ status: 'ok', data: db.getOverrides() });
+      return res.status(200).json({ status: 'ok', data: db.getOverrides(req.userId) });
     } catch (err) {
       logger.error('GET /overrides алдаа', { err: err?.message });
       return res.status(500).json({ status: 'error', error: 'Internal Server Error' });
@@ -73,7 +84,7 @@ export function createMetaRouter({ db, ai }) {
       if (!valid.includes(category)) {
         return res.status(400).json({ status: 'error', error: `category нь дараахын нэг байх ёстой: ${valid.join(', ')}` });
       }
-      const override = db.addOverride(merchantPattern, category, friendlyName || null, defaultNote || null);
+      const override = db.addOverride(req.userId, merchantPattern, category, friendlyName || null, defaultNote || null);
       return res.status(201).json({ status: 'ok', override });
     } catch (err) {
       logger.error('POST /overrides алдаа', { err: err?.message });
