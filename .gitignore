@@ -8,6 +8,10 @@
 .env.*
 !.env.example
 
+# ---- Deploy-ийн бодит утга (host/user/path/token) — ХЭЗЭЭ Ч оруулахгүй ----
+deploy/.deploy.local.env
+*.local.env
+
 # ---- Google OAuth нууц файлууд ----
 credentials.json
 client_secret*.json

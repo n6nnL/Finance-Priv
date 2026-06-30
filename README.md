@@ -1,5 +1,9 @@
 # Bank Email Listener (Голомт банк → вэбсайт API)
 
+> 🚀 **Deploy хийх:** [`deploy/DEPLOY_RUNBOOK.md`](deploy/DEPLOY_RUNBOOK.md) (process,
+> placeholder-тай). Серверийн бодит утга (host/user/path/domain) нь gitignore хийсэн
+> `deploy/.deploy.local.env`-д — repo-д ОРОХГҮЙ. Анхны суулгац: [`DEPLOYMENT.md`](DEPLOYMENT.md).
+
 Gmail хайрцагт **Голомт банкнаас** (`alert@golomtbank.com`) гүйлгээний имэйл ирмэгц **бараг real-time** (IMAP IDLE) илрүүлж, агуулгыг задлан, ангилж, вэбсайтын API руу POST хийдэг, **байнга ажилладаг** Node.js service.
 
 - ✅ IMAP IDLE — секундын дотор шинэ имэйл барина

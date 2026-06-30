@@ -47,14 +47,15 @@ ok('Асаагүй түлхүүрт recovery → юу ч илгээхгүй');
 console.log('\n[2] Payload-д токен/PII байхгүй (scrub)');
 _resetOpsState();
 sent.length = 0;
+// ⚠️ ЗӨВХӨН ХУУРМАГ утга (бодит токен ХЭЗЭЭ Ч энд бичихгүй) — scrub() шалгах зорилготой.
 const dirty =
-  'refresh 1//01uBO3UyJrrKICgYIARAAGAESNwF-L9Ir87 for tuguldur.b307@gmail.com ' +
-  'Bearer ya29.A0ARrdaM9xKVeryLongAccessTokenValue123456 secret=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcd';
+  'refresh 1//0FAKErefreshTokenForTestOnly1234567890 for user@example.com ' +
+  'Bearer ya29.FAKEaccessTokenForTestOnly1234567890 secret=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcd';
 await notifyOps('oauth-invalid-grant', new Error(dirty));
 const bodyStr = JSON.stringify(sent[0].body);
-assert.ok(!/1\/\/01uBO3/.test(bodyStr), 'refresh token задарсан!');
-assert.ok(!/ya29\.A0ARrdaM9/.test(bodyStr), 'access token задарсан!');
-assert.ok(!/tuguldur\.b307@gmail\.com/.test(bodyStr), 'имэйл задарсан!');
+assert.ok(!/1\/\/0FAKEref/.test(bodyStr), 'refresh token задарсан!');
+assert.ok(!/ya29\.FAKEacc/.test(bodyStr), 'access token задарсан!');
+assert.ok(!/user@example\.com/.test(bodyStr), 'имэйл задарсан!');
 assert.ok(!/ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcd/.test(bodyStr), 'secret задарсан!');
 ok('refresh/access token, имэйл, secret бүгд redact хийгдсэн');
 console.log('     scrub() гаралт:', JSON.stringify(scrub(dirty)));
