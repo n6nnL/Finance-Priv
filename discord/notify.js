@@ -3,7 +3,7 @@
 // ============================================================
 
 import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
-import { CATEGORIES, encodeButtonId } from './categories.js';
+import { CATEGORIES, encodeButtonId, encodeEditButtonId } from './categories.js';
 
 const COLOR_EXPENSE = 0xef4444; // улаан
 const COLOR_INCOME = 0x22c55e; // ногоон
@@ -64,17 +64,34 @@ export function buildButtonRows(txnId, isPos) {
   return rows;
 }
 
+/** Аль хэдийн ангилагдсан гүйлгээнд "Ангилал засах" товч (1 эгнээ) */
+export function buildEditRow(txnId) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(encodeEditButtonId(txnId))
+      .setLabel('✏️ Ангилал засах')
+      .setStyle(ButtonStyle.Secondary)
+  );
+}
+
+/**
+ * Гүйлгээний төлөвт тохирох component-ууд:
+ *  - pending_review → ангиллын товчлуурууд (баталгаажуулах)
+ *  - classified     → "Ангилал засах" товч (дахин засах боломж)
+ */
+export function buildComponentsFor(tx) {
+  const pending = tx.status === 'pending_review' || tx.category == null;
+  return pending ? buildButtonRows(tx.id, tx.is_pos === 1) : [buildEditRow(tx.id)];
+}
+
 /**
  * Гүйлгээний мэдэгдэл илгээх.
- * - classified → зөвхөн embed (товчгүй)
+ * - classified → embed + "Ангилал засах" товч
  * - pending_review → embed + ангиллын товчлуурууд
  * @returns {Promise<import('discord.js').Message>}
  */
 export async function sendNotification(channel, tx) {
-  const embed = buildEmbed(tx);
-  const pending = tx.status === 'pending_review' || tx.category == null;
-  const components = pending ? buildButtonRows(tx.id, tx.is_pos === 1) : [];
-  return channel.send({ embeds: [embed], components });
+  return channel.send({ embeds: [buildEmbed(tx)], components: buildComponentsFor(tx) });
 }
 
-export default { buildEmbed, buildButtonRows, sendNotification, fmtMoney, fmtDate, displayName };
+export default { buildEmbed, buildButtonRows, buildEditRow, buildComponentsFor, sendNotification, fmtMoney, fmtDate, displayName };

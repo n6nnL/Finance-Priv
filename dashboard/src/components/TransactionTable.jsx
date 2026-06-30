@@ -8,9 +8,9 @@ export default function TransactionTable({ data, total, limit, offset, loading, 
 
   if (!loading && data.length === 0) {
     return (
-      <div style={{ background: '#FFFDF9', border: '1px dashed #E3DACB', borderRadius: 18, padding: '40px 20px', textAlign: 'center', color: '#A39A8A' }}>
-        <div style={{ fontSize: 32, marginBottom: 10 }}>🔍</div>
-        <div style={{ fontSize: 14 }}>Тохирох гүйлгээ олдсонгүй</div>
+      <div className="bg-cream-card border border-dashed border-cream-input rounded-card pt-[40px] px-[20px] pb-[40px] text-center text-[#A39A8A]">
+        <div className="text-[32px] mb-[10px]">🔍</div>
+        <div className="text-[14px]">Тохирох гүйлгээ олдсонгүй</div>
       </div>
     );
   }
@@ -18,53 +18,55 @@ export default function TransactionTable({ data, total, limit, offset, loading, 
   return (
     <div>
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-        <div style={{ fontFamily: 'Rubik', fontWeight: 600, fontSize: 16, color: '#2A2722' }}>
-          Гүйлгээ <span style={{ fontFamily: 'Onest', fontWeight: 400, fontSize: 13, color: '#A39A8A' }}>({total})</span>
+      <div className="flex items-center justify-between mb-[10px]">
+        <div className="font-display font-semibold text-[16px] text-[#2A2722]">
+          Гүйлгээ <span className="font-body font-normal text-[13px] text-[#A39A8A]">({total})</span>
         </div>
-        {loading && <span style={{ fontSize: 13, color: '#A39A8A' }}>Ачаалж байна...</span>}
+        {loading && <span className="text-[13px] text-[#A39A8A]">Ачаалж байна...</span>}
       </div>
 
       {/* List */}
-      <div style={{ background: '#FFFDF9', border: '1px solid #EAE1D3', borderRadius: 18, overflow: 'hidden' }}>
+      <div className="bg-cream-card border border-cream-border rounded-card overflow-hidden">
         {data.map((t, i) => {
           const hex = catHex(t.category);
           const isIncome = t.type === 'income';
           return (
             <div
               key={t.id}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 14,
-                padding: '14px 18px',
-                borderBottom: i < data.length - 1 ? '1px solid #F2EADC' : 'none',
-              }}
+              className={`flex items-start sm:items-center gap-[14px] py-[14px] px-[18px] ${i < data.length - 1 ? 'border-b border-[#F2EADC]' : ''}`}
             >
-              {/* Icon */}
-              <div style={{ width: 42, height: 42, flexShrink: 0, borderRadius: 12, background: hexTint(hex, 0.12), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 }}>
+              {/* Icon (fixed) */}
+              <div
+                className="w-[42px] h-[42px] shrink-0 rounded-[12px] flex items-center justify-center text-[20px]"
+                style={{ background: hexTint(hex, 0.12) }}
+              >
                 {catEmoji(t.category)}
               </div>
 
-              {/* Info */}
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 600, fontSize: 14.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={t.description}>
-                  {displayDesc(t)}
+              {/* Flexible region: stacks on mobile, icon·info·amount on sm+ */}
+              <div className="min-w-0 flex-1 flex flex-col gap-[4px] sm:flex-row sm:items-center sm:justify-between sm:gap-[14px]">
+                {/* Info */}
+                <div className="min-w-0 flex-1">
+                  <div className="font-semibold text-[14.5px] truncate" title={t.description}>
+                    {displayDesc(t)}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-[8px] mt-[3px]">
+                    <span className="text-[13px] font-semibold px-[8px] py-[2px] rounded-full whitespace-nowrap" style={{ color: hex, background: hexTint(hex, 0.12) }}>
+                      {catLabel(t.category)}
+                    </span>
+                    {t.account_last4 && <span className="text-[13px] text-[#A39A8A] whitespace-nowrap">••{t.account_last4}</span>}
+                    {t.is_pos === 1 && <span className="text-[13px] text-[#3FA9A0] whitespace-nowrap">POS</span>}
+                  </div>
+                  <NoteEditor row={t} />
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 3 }}>
-                  <span style={{ fontSize: 11.5, fontWeight: 600, color: hex, background: hexTint(hex, 0.12), padding: '2px 8px', borderRadius: 999 }}>
-                    {catLabel(t.category)}
-                  </span>
-                  {t.account_last4 && <span style={{ fontSize: 12, color: '#A39A8A' }}>••{t.account_last4}</span>}
-                  {t.is_pos === 1 && <span style={{ fontSize: 11, color: '#3FA9A0' }}>POS</span>}
-                </div>
-                <NoteEditor row={t} />
-              </div>
 
-              {/* Amount + date */}
-              <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                <div style={{ fontFamily: 'Rubik', fontWeight: 600, fontSize: 15.5, color: isIncome ? '#2E9E5B' : '#D8483B', whiteSpace: 'nowrap' }}>
-                  {isIncome ? '+' : '−'}{money(t.amount)}
+                {/* Amount + date */}
+                <div className="text-left sm:text-right shrink-0">
+                  <div className="font-display font-semibold text-[15.5px] whitespace-nowrap" style={{ color: isIncome ? '#2E9E5B' : '#D8483B' }}>
+                    {isIncome ? '+' : '−'}{money(t.amount)}
+                  </div>
+                  <div className="text-[13px] text-[#A39A8A] mt-[2px] whitespace-nowrap">{t.txn_date || '-'}</div>
                 </div>
-                <div style={{ fontSize: 12, color: '#A39A8A', marginTop: 2 }}>{t.txn_date || '-'}</div>
               </div>
             </div>
           );
@@ -72,19 +74,19 @@ export default function TransactionTable({ data, total, limit, offset, loading, 
       </div>
 
       {/* Pagination */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 14 }}>
+      <div className="flex items-center justify-between mt-[14px]">
         <button
           onClick={() => onPage(offset - limit)}
           disabled={offset <= 0}
-          style={{ height: 38, padding: '0 16px', border: '1px solid #EAE1D3', background: '#FFFDF9', borderRadius: 10, fontFamily: 'Onest', fontSize: 13.5, color: '#6E665A', cursor: offset <= 0 ? 'not-allowed' : 'pointer', opacity: offset <= 0 ? 0.4 : 1 }}
+          className="h-[38px] px-[16px] border border-cream-border bg-cream-card rounded-[10px] font-body text-[13.5px] text-[#6E665A] cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
         >
           ← Өмнөх
         </button>
-        <span style={{ fontSize: 13, color: '#A39A8A' }}>{page} / {pages}</span>
+        <span className="text-[13px] text-[#A39A8A]">{page} / {pages}</span>
         <button
           onClick={() => onPage(offset + limit)}
           disabled={offset + limit >= total}
-          style={{ height: 38, padding: '0 16px', border: '1px solid #EAE1D3', background: '#FFFDF9', borderRadius: 10, fontFamily: 'Onest', fontSize: 13.5, color: '#6E665A', cursor: offset + limit >= total ? 'not-allowed' : 'pointer', opacity: offset + limit >= total ? 0.4 : 1 }}
+          className="h-[38px] px-[16px] border border-cream-border bg-cream-card rounded-[10px] font-body text-[13.5px] text-[#6E665A] cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
         >
           Дараах →
         </button>
@@ -112,7 +114,7 @@ function NoteEditor({ row }) {
 
   if (editing) {
     return (
-      <div style={{ marginTop: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+      <div className="mt-[4px] flex items-center gap-[6px]">
         <input
           value={draft}
           onChange={e => setDraft(e.target.value)}
@@ -120,10 +122,10 @@ function NoteEditor({ row }) {
           autoComplete="off"
           placeholder="тэмдэглэл..."
           onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') setEditing(false); }}
-          style={{ border: '1px solid #E3DACB', borderRadius: 8, padding: '3px 8px', fontSize: 12, flex: 1, minWidth: 0, fontFamily: 'Onest', outline: 'none', color: '#2A2722' }}
+          className="border border-cream-input rounded-[8px] px-[8px] py-[3px] text-[13px] flex-1 min-w-0 font-body outline-none text-[#2A2722]"
         />
-        <button disabled={busy} onClick={save} style={{ fontSize: 12, color: '#1F7A6B', border: 'none', background: 'none', cursor: 'pointer' }}>хадгалах</button>
-        <button onClick={() => { setDraft(note); setEditing(false); }} style={{ fontSize: 12, color: '#A39A8A', border: 'none', background: 'none', cursor: 'pointer' }}>×</button>
+        <button disabled={busy} onClick={save} className="text-[13px] text-[#1F7A6B] border-none bg-transparent cursor-pointer">хадгалах</button>
+        <button onClick={() => { setDraft(note); setEditing(false); }} className="text-[13px] text-[#A39A8A] border-none bg-transparent cursor-pointer">×</button>
       </div>
     );
   }
@@ -132,7 +134,8 @@ function NoteEditor({ row }) {
     <div
       onClick={() => { setDraft(note); setEditing(true); }}
       title="Тэмдэглэл засах"
-      style={{ marginTop: 2, fontSize: 12, color: note ? '#8C8578' : '#D8CFBF', cursor: 'pointer' }}
+      className="mt-[2px] text-[13px] cursor-pointer"
+      style={{ color: note ? '#8C8578' : '#D8CFBF' }}
     >
       {note ? `📝 ${note}` : '＋ тэмдэглэл'}
     </div>

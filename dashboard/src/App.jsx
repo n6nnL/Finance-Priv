@@ -6,6 +6,7 @@ import Summary from './components/Summary.jsx';
 import TransactionTable from './components/TransactionTable.jsx';
 import PendingReview from './components/PendingReview.jsx';
 import Analyze from './components/Analyze.jsx';
+import Calendar from './components/Calendar.jsx';
 import Insights from './components/Insights.jsx';
 
 const PAGE = 50;
@@ -22,10 +23,11 @@ function thisMonthFilter() {
 const SECTIONS = [
   { key: 'txn',      label: 'Бүртгэл',   icon: '🧾' },
   { key: 'analyze',  label: 'Шинжилгээ', icon: '📊' },
+  { key: 'calendar', label: 'Календарь', icon: '📅' },
   { key: 'insights', label: 'Шийдвэр',   icon: '💡' },
 ];
 
-const PAGE_TITLE = { txn: 'Бүртгэл', analyze: 'Шинжилгээ', insights: 'Шийдвэр' };
+const PAGE_TITLE = { txn: 'Бүртгэл', analyze: 'Шинжилгээ', calendar: 'Календарь', insights: 'Шийдвэр' };
 
 function currentMonthLabel() {
   const d = new Date();
@@ -109,9 +111,9 @@ export default function App() {
       <aside style={{
         width: 248, flexShrink: 0,
         background: '#FFFDF9', borderRight: '1px solid #EAE1D3',
-        padding: '24px 16px', display: 'flex', flexDirection: 'column',
+        padding: '24px 16px',
         position: 'sticky', top: 0, height: '100vh',
-      }} className="hidden lg:flex">
+      }} className="hidden lg:flex flex-col">
         {/* Logo */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '6px 8px 24px' }}>
           <BrandLogo size={36} r={11} />
@@ -145,7 +147,7 @@ export default function App() {
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 14, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Хэрэглэгч</div>
-            <div style={{ fontSize: 12, color: '#A39A8A', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{userEmail}</div>
+            <div style={{ fontSize: 13, color: '#A39A8A', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{userEmail}</div>
           </div>
           <button onClick={logout} title="Гарах" style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#B0A696', fontSize: 18, padding: 4, flexShrink: 0 }}>⎋</button>
         </div>
@@ -201,6 +203,7 @@ export default function App() {
           )}
 
           {section === 'analyze' && <Analyze />}
+          {section === 'calendar' && <Calendar />}
           {section === 'insights' && <Insights />}
         </div>
       </main>
@@ -210,9 +213,9 @@ export default function App() {
         position: 'fixed', bottom: 0, left: 0, right: 0,
         background: 'rgba(255,253,249,.96)', backdropFilter: 'blur(12px)',
         borderTop: '1px solid #EAE1D3',
-        display: 'flex', padding: '8px 8px calc(8px + env(safe-area-inset-bottom,0px))',
+        padding: '8px 8px calc(8px + env(safe-area-inset-bottom,0px))',
         zIndex: 20,
-      }} className="lg:hidden">
+      }} className="flex lg:hidden">
         {SECTIONS.map(s => {
           const active = section === s.key;
           return (
@@ -222,7 +225,7 @@ export default function App() {
               color: active ? '#1F7A6B' : '#9A9182',
             }}>
               <span style={{ fontSize: 21 }}>{s.icon}</span>
-              <span style={{ fontSize: 11, fontWeight: active ? 600 : 500 }}>{s.label}</span>
+              <span style={{ fontSize: 13, fontWeight: active ? 600 : 500 }}>{s.label}</span>
             </button>
           );
         })}

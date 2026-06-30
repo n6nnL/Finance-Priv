@@ -11,18 +11,20 @@
 
 import {
   Client, GatewayIntentBits, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder,
+  StringSelectMenuBuilder, StringSelectMenuOptionBuilder,
 } from 'discord.js';
 import { DatabaseSync } from 'node:sqlite';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { config } from './config.js';
-import { categoryByIndex, encodeModalId, parseId } from './categories.js';
-import { sendNotification, buildEmbed } from './notify.js';
-import { patchCategory } from './apiClient.js';
+import { CATEGORIES, categoryByIndex, encodeModalId, encodeCatSelectId, parseId } from './categories.js';
+import { sendNotification, buildEmbed, buildComponentsFor } from './notify.js';
+import { patchCategory, getTransaction } from './apiClient.js';
 
-// --- DB (read-only polling) ---
+// --- DB (read-only polling) — зөвхөн шинэ гүйлгээ ИЛРҮҮЛЭХЭД ашиглана.
+//     Interaction үеийн төлөв шалгалт/бичилт нь API-аар явна (write нь
+//     шууд-DB биш, dashboard-той нийцтэй байхын тулд). ---
 const db = new DatabaseSync(config.dbPath);
 const qNew = db.prepare('SELECT * FROM transactions WHERE id > ? ORDER BY id ASC LIMIT 25');
-const qById = db.prepare('SELECT * FROM transactions WHERE id = ?');
 const qMaxId = db.prepare('SELECT COALESCE(MAX(id),0) AS m FROM transactions');
 
 // --- Bot төлөв (хамгийн сүүлд мэдэгдсэн id) ---
@@ -74,11 +76,12 @@ async function poll() {
       for (const tx of rows) {
         try {
           await sendNotification(ch, tx);
+          lastNotifiedId = Math.max(lastNotifiedId, Number(tx.id));
+          saveState({ lastNotifiedId }); // тус бүрд хадгална (давхар илгээхгүй)
         } catch (e) {
           log('error', `мэдэгдэл илгээх алдаа id=${tx.id}`, e.message);
+          break; // дараагийнхыг оролдохгүй — дараагийн poll-д retry
         }
-        lastNotifiedId = Math.max(lastNotifiedId, Number(tx.id));
-        saveState({ lastNotifiedId }); // тус бүрд хадгална (давхар илгээхгүй)
       }
     }
   } catch (e) {
@@ -88,21 +91,88 @@ async function poll() {
   }
 }
 
+/** Мессежийг гүйлгээний одоогийн төлөвт нь шинэчлэх (component-ийг төлөвт нь тааруулна). */
+async function refreshStaleMessage(messageId, row) {
+  if (!messageId || !row) return;
+  try {
+    const ch = await getChannel();
+    const msg = await ch.messages.fetch(messageId).catch(() => null);
+    if (msg) await msg.edit({ embeds: [buildEmbed(row)], components: buildComponentsFor(row) });
+  } catch { /* мессеж засаж чадахгүй ч interaction-г унагаахгүй */ }
+}
+
+/** Засварын ангилал select — одоогийн ангиллыг default болгож харуулна. */
+function buildCategorySelect(txnId, originMessageId, currentCategory) {
+  const menu = new StringSelectMenuBuilder()
+    .setCustomId(encodeCatSelectId(txnId, originMessageId))
+    .setPlaceholder('Шинэ ангилал сонгох…')
+    .addOptions(
+      CATEGORIES.map((c) =>
+        new StringSelectMenuOptionBuilder().setLabel(c).setValue(c).setDefault(c === currentCategory)
+      )
+    );
+  return new ActionRowBuilder().addComponents(menu);
+}
+
 // --- Interaction: товч → modal → PATCH → edit ---
+//  POS (BOM) → "Ямар газар?", шилжүүлэг → "Юунд?" (асуултын логик хадгалагдсан).
+//  Interaction бүрийг 3с дотор ack хийнэ (button=showModal, submit=deferReply),
+//  API бичихээс ӨМНӨ. Interaction үед төлөвийг API-аас дахин татаж, аль хэдийн
+//  шийдэгдсэн/устсан бол алдаа биш — эелдэг мессеж харуулна.
 client.on('interactionCreate', async (interaction) => {
   try {
     if (interaction.isButton()) {
       const p = parseId(interaction.customId);
-      if (!p || p.kind !== 'c') return;
+      if (!p) return;
+
+      // --- "Ангилал засах" товч (аль хэдийн бүртгэгдсэн гүйлгээ) ---
+      if (p.kind === 'e') {
+        // Interaction үед одоогийн утгыг API-аас татаж, default болгож харуулна
+        // (Dashboard-аар саяхан өөрчилсөн байж болзошгүй — stale бичихгүй).
+        let current = null;
+        try { current = await getTransaction(p.txnId); } catch { current = null; }
+        if (!current) {
+          await interaction.reply({ content: '⚠️ Энэ гүйлгээ олдсонгүй (устсан байж магадгүй).', ephemeral: true });
+          return;
+        }
+        const row = buildCategorySelect(p.txnId, interaction.message.id, current.category);
+        await interaction.reply({
+          content: `Одоогийн ангилал: **${current.category || '(ангилаагүй)'}**\nШинэ ангилал сонгоно уу:`,
+          components: [row],
+          ephemeral: true,
+        });
+        return;
+      }
+
+      // --- pending ангиллын товч (Prompt 2) ---
+      if (p.kind !== 'c') return;
       const cat = categoryByIndex(p.catIdx);
       if (!cat) return;
-      // POS бол газрын нэр, бусад бол шалтгаан асуух modal
+
+      // Одоогийн төлөвийг API-аас шалгах (Dashboard-аар шийдэгдсэн эсэх).
+      // localhost GET — хурдан тул showModal-ийн 3с төсөвт багтана.
+      let current = null;
+      try { current = await getTransaction(p.txnId); } catch { current = null; }
+      if (!current) {
+        await interaction.reply({ content: '⚠️ Энэ гүйлгээ олдсонгүй (устсан байж магадгүй).', ephemeral: true });
+        return;
+      }
+      if (current.status !== 'pending_review') {
+        await interaction.reply({
+          content: `✓ Энэ гүйлгээ аль хэдийн **${current.category || 'шийдэгдсэн'}** болсон байна.`,
+          ephemeral: true,
+        });
+        await refreshStaleMessage(interaction.message.id, current);
+        return;
+      }
+
+      // POS бол "Ямар газар?", шилжүүлэг бол "Юунд?"
       const modal = new ModalBuilder()
         .setCustomId(encodeModalId(p.txnId, p.catIdx, p.isPos, interaction.message.id))
         .setTitle(`${cat} болгох`);
       const input = new TextInputBuilder()
         .setCustomId('value')
-        .setLabel(p.isPos ? 'Газрын нэр (заавал биш)' : 'Шалтгаан (заавал биш)')
+        .setLabel(p.isPos ? 'Ямар газар?' : 'Юунд?')
         .setPlaceholder(p.isPos ? 'жишээ: Шулуун дун' : 'жишээ: Ээжид сарын мөнгө')
         .setStyle(TextInputStyle.Short)
         .setRequired(false)
@@ -112,25 +182,77 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
 
+    // --- Засварын ангилал select submit ---
+    if (interaction.isStringSelectMenu()) {
+      const p = parseId(interaction.customId);
+      if (!p || p.kind !== 'es') return;
+      // ack (3с дотор) — API дуудахаас ӨМНӨ
+      await interaction.deferUpdate();
+      const chosen = interaction.values?.[0];
+      if (!chosen) return;
+
+      // Interaction үед одоогийн төлөвийг дахин татах (stale бичихгүй)
+      let current = null;
+      try { current = await getTransaction(p.txnId); } catch { current = null; }
+      if (!current) {
+        await interaction.editReply({ content: '⚠️ Энэ гүйлгээ олдсонгүй (устсан байж магадгүй).', components: [] });
+        return;
+      }
+      // Өөрчлөлтгүй бол бичихгүй (unchanged field-ийг дарж бичихгүй)
+      if (current.category === chosen) {
+        await interaction.editReply({ content: `✓ Аль хэдийн **${chosen}** байна. Өөрчлөлтгүй.`, components: [] });
+        return;
+      }
+      try {
+        // Категорийн өөрчлөлт нь Dashboard-тай ИЖИЛ /category endpoint-оор:
+        // applyToAll → learned override шинэчлэх + manually_edited=1 (API талд).
+        const r = await patchCategory(p.txnId, { category: chosen, applyToAll: true });
+        const updated = await getTransaction(p.txnId).catch(() => null);
+        if (p.messageId && updated) await refreshStaleMessage(p.messageId, updated);
+        await interaction.editReply({
+          content: `✅ **${chosen}** болгож өөрчиллөө${r.updated > 1 ? ` (${r.updated} гүйлгээнд)` : ''}.`,
+          components: [],
+        });
+        log('info', `Discord-оор ангилал засав id=${p.txnId} → ${chosen}`, `updated=${r.updated}`);
+      } catch (e) {
+        log('error', `ангилал засах алдаа id=${p.txnId}`, e.message);
+        await interaction.editReply({ content: '❌ Засахад алдаа гарлаа. Дахин оролдоно уу.', components: [] });
+      }
+      return;
+    }
+
     if (interaction.isModalSubmit()) {
       const p = parseId(interaction.customId);
       if (!p || p.kind !== 'm') return;
-      const cat = categoryByIndex(p.catIdx);
-      if (!cat) { await interaction.reply({ content: 'Ангилал танигдсангүй', ephemeral: true }); return; }
-
+      // ⚠️ API бичихээс ӨМНӨ заавал ack (3с дотор) — "interaction failed"-аас сэргийлнэ.
       await interaction.deferReply({ ephemeral: true });
+      const cat = categoryByIndex(p.catIdx);
+      if (!cat) { await interaction.editReply('Ангилал танигдсангүй'); return; }
+
+      // Interaction үед төлөвийг дахин татах (modal нээгдсэнээс хойш Dashboard-аар
+      // шийдэгдсэн байж болзошгүй).
+      let current = null;
+      try { current = await getTransaction(p.txnId); } catch { current = null; }
+      if (!current) {
+        await interaction.editReply('⚠️ Энэ гүйлгээ олдсонгүй (устсан байж магадгүй).');
+        return;
+      }
+      if (current.status !== 'pending_review') {
+        await interaction.editReply(`✓ Энэ гүйлгээ аль хэдийн **${current.category || 'шийдэгдсэн'}** болсон. Дахин бичсэнгүй.`);
+        await refreshStaleMessage(p.messageId, current);
+        return;
+      }
+
       const value = (interaction.fields.getTextInputValue('value') || '').trim();
       const extra = p.isPos ? { merchantPlace: value } : { note: value };
 
       try {
+        // applyToAll → тэр мерчантын бүгдэд + learned override + manually_edited=1
+        // (API талд). Бүх бичилт API-аар → Dashboard-той нийцтэй.
         const r = await patchCategory(p.txnId, { category: cat, applyToAll: true, ...extra });
-        // Мессежийг шинэчлэх: DB-ээс дахин уншиж embed-г classified болгоно
-        const updated = qById.get(p.txnId);
-        const ch = await getChannel();
-        if (p.messageId && updated) {
-          const msg = await ch.messages.fetch(p.messageId).catch(() => null);
-          if (msg) await msg.edit({ embeds: [buildEmbed(updated)], components: [] });
-        }
+        // Шинэчилсэн төлөвийг API-аас уншиж мессежийг classified болгоно.
+        const updated = await getTransaction(p.txnId).catch(() => null);
+        if (p.messageId && updated) await refreshStaleMessage(p.messageId, updated);
         await interaction.editReply(`✅ **${cat}** болгож хадгаллаа${r.updated > 1 ? ` (${r.updated} гүйлгээнд)` : ''}.`);
         log('info', `ангилагдлаа id=${p.txnId} → ${cat}`, `updated=${r.updated}`);
       } catch (e) {

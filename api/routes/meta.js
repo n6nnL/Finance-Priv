@@ -39,6 +39,28 @@ export function createMetaRouter({ db, ai }) {
     }
   });
 
+  // ---- GET /api/analytics/by-category?month=YYYY-MM — сарын ангиллын задаргаа ----
+  //  Зөвхөн ЗАРЛАГА (орлогыг pie-д оруулахгүй; totalIncome тусдаа). Ангилаагүй/
+  //  pending → 'Ангилаагүй' зүсэм. Сар нь txn_date-аар (UB орон нутгийн огноо).
+  //  Нэгтгэлийг SQL GROUP BY-аар хийнэ (бүх мөрийг browser руу илгээхгүй).
+  router.get('/analytics/by-category', (req, res) => {
+    try {
+      const month = String(req.query.month || '');
+      if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+        return res.status(400).json({ status: 'error', error: 'month нь YYYY-MM (01–12) хэлбэртэй байх ёстой' });
+      }
+      const out = db.getByCategory(req.userId, month);
+      return res.status(200).json({
+        status: 'ok',
+        timezone: 'Asia/Ulaanbaatar (txn_date — өдрийн нарийвчлал)',
+        ...out,
+      });
+    } catch (err) {
+      logger.error('GET /analytics/by-category алдаа', { err: err?.message });
+      return res.status(500).json({ status: 'error', error: 'Internal Server Error' });
+    }
+  });
+
   // ---- GET /api/categories — ангиллын жагсаалт ----
   router.get('/categories', (_req, res) => {
     return res.status(200).json({ status: 'ok', categories: listCategories() });

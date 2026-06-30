@@ -108,6 +108,7 @@ export const api = {
   pending: (p) => req('/api/transactions/pending' + qs(p)),
   summary: (filters) => req('/api/summary' + qs(filters)),
   monthly: (months) => req('/api/monthly' + qs({ months })),
+  byCategory: (month) => req('/api/analytics/by-category' + qs({ month })),
   categories: () => req('/api/categories'),
   overrides: () => req('/api/overrides'),
   patchCategory: (id, { category, applyToAll, merchantPlace, note }) =>

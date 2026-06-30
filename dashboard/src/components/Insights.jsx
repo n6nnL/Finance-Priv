@@ -6,27 +6,30 @@ const CARDS = [
 
 export default function Insights() {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', padding: '40px 16px 24px' }}>
-      <div style={{ width: 80, height: 80, borderRadius: 24, background: 'linear-gradient(135deg,#1F7A6B,#2E9E7E)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 38, boxShadow: '0 12px 30px rgba(31,122,107,.28)', marginBottom: 22 }}>
+    <div className="flex flex-col items-center text-center pt-[40px] px-[16px] pb-[24px]">
+      <div
+        className="w-[80px] h-[80px] rounded-[24px] flex items-center justify-center text-[38px] shadow-[0_12px_30px_rgba(31,122,107,0.28)] mb-[22px]"
+        style={{ background: 'linear-gradient(135deg,#1F7A6B,#2E9E7E)' }}
+      >
         💡
       </div>
-      <div style={{ display: 'inline-block', background: '#F0D9C9', color: '#B5662F', fontSize: 12.5, fontWeight: 600, padding: '5px 13px', borderRadius: 999, marginBottom: 16 }}>
+      <div className="inline-block bg-[#F0D9C9] text-[#B5662F] text-[13px] font-semibold px-[13px] py-[5px] rounded-full mb-[16px]">
         Удахгүй
       </div>
-      <h2 style={{ fontFamily: 'Rubik', fontWeight: 600, fontSize: 26, letterSpacing: '-.5px', margin: '0 0 10px' }}>
+      <h2 className="font-display font-semibold text-[26px] tracking-[-0.5px] m-0 mb-[10px]">
         Ухаалаг санхүүгийн туслах
       </h2>
-      <p style={{ margin: '0 0 36px', maxWidth: 480, color: '#8C8578', fontSize: 15, lineHeight: 1.6 }}>
+      <p className="m-0 mb-[36px] max-w-[480px] text-[#8C8578] text-[15px] leading-[1.6]">
         Таны зарлагын хэвшилд тулгуурлан төсөв санал болгох, ирэх сарын урсгалыг таамаглах, хэмнэх боломжийг олж харах ухаалаг туслах.
       </p>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 14, maxWidth: 760, width: '100%' }} className="grid-cols-1 sm:grid-cols-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-[14px] max-w-[760px] w-full">
         {CARDS.map(c => (
-          <div key={c.title} style={{ background: '#FFFDF9', border: '1px solid #EAE1D3', borderRadius: 18, padding: 22, textAlign: 'left', position: 'relative', overflow: 'hidden' }}>
-            <div style={{ fontSize: 30, marginBottom: 14, filter: 'saturate(.85)' }}>{c.icon}</div>
-            <div style={{ fontFamily: 'Rubik', fontWeight: 600, fontSize: 16, marginBottom: 6 }}>{c.title}</div>
-            <div style={{ fontSize: 13.5, color: '#8C8578', lineHeight: 1.5 }}>{c.desc}</div>
-            <div style={{ position: 'absolute', top: 14, right: 14, fontSize: 14 }}>🔒</div>
+          <div key={c.title} className="bg-cream-card border border-cream-border rounded-card p-[22px] text-left relative overflow-hidden">
+            <div className="text-[30px] mb-[14px] saturate-[.85]">{c.icon}</div>
+            <div className="font-display font-semibold text-[16px] mb-[6px]">{c.title}</div>
+            <div className="text-[13.5px] text-[#8C8578] leading-[1.5]">{c.desc}</div>
+            <div className="absolute top-[14px] right-[14px] text-[14px]">🔒</div>
           </div>
         ))}
       </div>

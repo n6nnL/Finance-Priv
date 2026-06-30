@@ -1,0 +1,187 @@
+import { useMemo, useState } from 'react';
+import { money } from '../lib/format.js';
+import {
+  MONTHS_MN, WEEKDAYS_MN, mondayIndex, ymd, parseYmd,
+  monthMarkers, getCycle,
+} from '../lib/budget.js';
+import Planner, { ALLOC_DEFAULTS } from './Planner.jsx';
+
+const TYPE = {
+  income: { dot: '#2E9E5B', tint: 'rgba(46,158,91,0.12)', label: 'Цалин' },
+  subscription: { dot: '#E0A33E', tint: 'rgba(224,163,62,0.14)' },
+  personal: { dot: '#D86A92', tint: 'rgba(216,106,146,0.14)' },
+};
+const PRIORITY = ['income', 'personal', 'subscription'];
+
+function markerAmount(mk) {
+  if (mk.type === 'subscription') return `$${mk.amountUsd} · ${money(mk.amountMnt)}`;
+  if (mk.amountMnt != null) return money(mk.amountMnt);
+  return '';
+}
+
+export default function Calendar() {
+  const today = new Date();
+  const [view, setView] = useState({ y: today.getFullYear(), m: today.getMonth() });
+  const [events, setEvents] = useState([]); // хувийн event-үүд (state-д; persistence дараа)
+  const [allocations, setAllocations] = useState({ ...ALLOC_DEFAULTS });
+  const [form, setForm] = useState({ title: '', date: '', amount: '' });
+
+  const markers = useMemo(() => monthMarkers(view.y, view.m, events), [view, events]);
+  const byDay = useMemo(() => {
+    const map = {};
+    for (const mk of markers) (map[mk.date] ||= []).push(mk);
+    return map;
+  }, [markers]);
+
+  const cycle = useMemo(() => getCycle(view.y, view.m), [view]);
+
+  const firstOfMonth = new Date(view.y, view.m, 1);
+  const offset = mondayIndex(firstOfMonth);
+  const daysInMonth = new Date(view.y, view.m + 1, 0).getDate();
+  const totalCells = Math.ceil((offset + daysInMonth) / 7) * 7;
+  const todayStr = ymd(today);
+
+  const shiftMonth = (delta) => {
+    setView((v) => {
+      const d = new Date(v.y, v.m + delta, 1);
+      return { y: d.getFullYear(), m: d.getMonth() };
+    });
+  };
+
+  const onAlloc = (key, raw) => {
+    const n = raw === '' ? '' : Math.max(0, Number(raw) || 0);
+    setAllocations((a) => ({ ...a, [key]: n }));
+  };
+
+  const addEvent = () => {
+    const title = form.title.trim();
+    if (!title || !form.date) return;
+    const amt = form.amount.trim() === '' ? undefined : Math.max(0, Number(form.amount) || 0);
+    setEvents((evs) => [
+      ...evs,
+      { id: `ev-${Date.now()}`, type: 'personal', title, date: form.date, amountMnt: amt },
+    ]);
+    setForm({ title: '', date: '', amount: '' });
+  };
+
+  const inputCls = 'h-[42px] px-[12px] border-[1.5px] border-cream-input rounded-[10px] bg-white font-body text-[14px] text-[#2A2722] outline-none';
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-[18px] items-start">
+      {/* ── Left: calendar ── */}
+      <div className="flex flex-col gap-[18px]">
+        <div className="bg-cream-card border border-cream-border rounded-card p-[18px]">
+          {/* Month header */}
+          <div className="flex items-center justify-between mb-[14px]">
+            <button onClick={() => shiftMonth(-1)} aria-label="Өмнөх сар"
+              className="w-[36px] h-[36px] rounded-[10px] border border-cream-border bg-cream-card text-[#6E665A] text-[16px] cursor-pointer flex items-center justify-center">‹</button>
+            <div className="font-display font-semibold text-[17px] whitespace-nowrap">{view.y} оны {MONTHS_MN[view.m]}</div>
+            <button onClick={() => shiftMonth(1)} aria-label="Дараа сар"
+              className="w-[36px] h-[36px] rounded-[10px] border border-cream-border bg-cream-card text-[#6E665A] text-[16px] cursor-pointer flex items-center justify-center">›</button>
+          </div>
+
+          {/* Weekday labels */}
+          <div className="grid grid-cols-7 gap-[4px] mb-[4px]">
+            {WEEKDAYS_MN.map((w) => (
+              <div key={w} className="text-center text-[13px] font-medium text-[#A39A8A] py-[2px]">{w}</div>
+            ))}
+          </div>
+
+          {/* Day grid */}
+          <div className="grid grid-cols-7 gap-[4px]">
+            {Array.from({ length: totalCells }, (_, i) => {
+              const dayNum = i - offset + 1;
+              if (dayNum < 1 || dayNum > daysInMonth) return <div key={i} />;
+              const dateStr = ymd(new Date(view.y, view.m, dayNum));
+              const dayMarkers = byDay[dateStr] || [];
+              const top = PRIORITY.find((t) => dayMarkers.some((mk) => mk.type === t));
+              const tint = top ? TYPE[top].tint : undefined;
+              const isToday = dateStr === todayStr;
+              return (
+                <div
+                  key={i}
+                  className={`min-h-[46px] sm:min-h-[68px] rounded-[8px] p-[4px] flex flex-col gap-[3px] ${isToday ? 'ring-2 ring-brand' : ''}`}
+                  style={{ background: tint || '#FBF7EF' }}
+                >
+                  <div className="text-[13px] font-medium text-[#4A453D] leading-none">{dayNum}</div>
+                  {/* dots (always) */}
+                  <div className="flex flex-wrap gap-[3px]">
+                    {dayMarkers.slice(0, 4).map((mk) => (
+                      <span key={mk.id} className="w-[7px] h-[7px] rounded-full" style={{ background: TYPE[mk.type].dot }} />
+                    ))}
+                  </div>
+                  {/* mini labels (sm+ only — cells big enough) */}
+                  <div className="hidden sm:flex flex-col gap-[2px] mt-auto">
+                    {dayMarkers.slice(0, 2).map((mk) => (
+                      <span key={mk.id} className="text-[13px] leading-tight truncate" style={{ color: TYPE[mk.type].dot }}
+                        title={mk.title}>
+                        {mk.type === 'income' ? '💰 ' : ''}{mk.title}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Add personal event */}
+        <div className="bg-cream-card border border-cream-border rounded-card p-[18px]">
+          <div className="font-display font-semibold text-[15px] mb-[12px]">Хувийн event нэмэх</div>
+          <div className="flex flex-col sm:flex-row gap-[8px]">
+            <input
+              value={form.title}
+              onChange={(e) => setForm({ ...form, title: e.target.value })}
+              placeholder="Нэр (ж: Төрсөн өдөр)"
+              className={`${inputCls} sm:flex-1 min-w-0`}
+            />
+            <input
+              type="date"
+              value={form.date}
+              onChange={(e) => setForm({ ...form, date: e.target.value })}
+              className={inputCls}
+            />
+            <input
+              type="number"
+              inputMode="numeric"
+              value={form.amount}
+              onChange={(e) => setForm({ ...form, amount: e.target.value })}
+              placeholder="Төсөв ₮"
+              className={`${inputCls} sm:w-[120px]`}
+            />
+            <button
+              onClick={addEvent}
+              className="h-[42px] px-[18px] border-none bg-brand text-white font-body font-semibold text-[14px] rounded-[10px] cursor-pointer whitespace-nowrap"
+            >
+              Нэмэх
+            </button>
+          </div>
+        </div>
+
+        {/* This month's markers (legible list — good on mobile) */}
+        <div className="bg-cream-card border border-cream-border rounded-card p-[18px]">
+          <div className="font-display font-semibold text-[15px] mb-[12px]">Энэ сарын тэмдэглэгээ</div>
+          {markers.length === 0 ? (
+            <div className="text-[13px] text-[#A39A8A]">Тэмдэглэгээ алга</div>
+          ) : (
+            <div className="flex flex-col gap-[10px]">
+              {markers.map((mk) => (
+                <div key={mk.id} className="flex items-center gap-[10px]">
+                  <span className="w-[9px] h-[9px] rounded-full shrink-0" style={{ background: TYPE[mk.type].dot }} />
+                  <span className="text-[13px] text-[#8C8578] whitespace-nowrap shrink-0 w-[44px]">{parseYmd(mk.date).getMonth() + 1}/{parseYmd(mk.date).getDate()}</span>
+                  <span className="min-w-0 flex-1 truncate font-medium text-[14px]" title={mk.title}>
+                    {mk.type === 'income' ? '💰 ' : ''}{mk.title}
+                  </span>
+                  <span className="text-[13px] text-[#6E665A] whitespace-nowrap shrink-0">{markerAmount(mk)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── Right: planner ── */}
+      <Planner cycle={cycle} personalEvents={events} allocations={allocations} onAlloc={onAlloc} />
+    </div>
+  );
+}

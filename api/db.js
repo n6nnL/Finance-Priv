@@ -60,6 +60,9 @@ export function createDb(dbPath, opts = {}) {
       ['transactions', 'note', 'ALTER TABLE transactions ADD COLUMN note TEXT'],
       ['transactions', 'is_pos', 'ALTER TABLE transactions ADD COLUMN is_pos INTEGER'],
       ['transactions', 'merchant_place', 'ALTER TABLE transactions ADD COLUMN merchant_place TEXT'],
+      // Хэрэглэгч гараар баталгаажуулсан мөр — pipeline (reparse/recategorize)
+      // үүнийг ХЭЗЭЭ Ч дахин parse/categorize хийхгүй.
+      ['transactions', 'manually_edited', 'ALTER TABLE transactions ADD COLUMN manually_edited INTEGER NOT NULL DEFAULT 0'],
     ]) {
       if (!hasColumn(t, c)) db.exec(def);
     }
@@ -248,6 +251,32 @@ export function createDb(dbPath, opts = {}) {
     return rows.reverse().map((r) => ({ month: r.ym, expense: Number(r.expense), income: Number(r.income), count: Number(r.count) }));
   }
 
+  /**
+   * Сонгосон сарын ангиллын задаргаа (зөвхөн ЗАРЛАГА; орлогыг pie-д оруулахгүй).
+   * Сар нь txn_date-аар тодорхойлогдоно (банкны имэйлийн ӨДРИЙН утга — UB
+   * орон нутгийн огноо, цагийн нарийвчлалгүй тул midnight-ийн tz хямрал үүсэхгүй).
+   * Ангилаагүй / pending_review → нэгтгэж 'Ангилаагүй' зүсэм болгоно (нийт тэнцэнэ).
+   * @returns {{month, byCategory:{category,total,count}[], totalExpense, totalIncome}|null}
+   */
+  function getByCategory(userId, month) {
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(String(month || ''))) return null;
+    const m = String(month);
+    const byCategory = db.prepare(`
+      SELECT CASE WHEN category IS NULL OR status='pending_review'
+                  THEN 'Ангилаагүй' ELSE category END AS category,
+             COUNT(*) AS count, COALESCE(SUM(amount),0) AS total
+      FROM transactions
+      WHERE user_id=? AND type='expense' AND txn_date IS NOT NULL
+            AND substr(txn_date,1,7)=?
+      GROUP BY 1 ORDER BY total DESC`).all(userId, m)
+      .map((r) => ({ category: r.category, total: Number(r.total), count: Number(r.count) }));
+    const exp = db.prepare(`SELECT COALESCE(SUM(amount),0) AS t FROM transactions
+      WHERE user_id=? AND type='expense' AND txn_date IS NOT NULL AND substr(txn_date,1,7)=?`).get(userId, m).t;
+    const inc = db.prepare(`SELECT COALESCE(SUM(amount),0) AS t FROM transactions
+      WHERE user_id=? AND type='income' AND txn_date IS NOT NULL AND substr(txn_date,1,7)=?`).get(userId, m).t;
+    return { month: m, byCategory, totalExpense: Number(exp), totalIncome: Number(inc) };
+  }
+
   function getPending(userId, { limit = 100, offset = 0 } = {}) {
     const lim = Math.min(Math.max(Number(limit) || 100, 1), 500);
     const off = Math.max(Number(offset) || 0, 0);
@@ -258,7 +287,8 @@ export function createDb(dbPath, opts = {}) {
 
   const _updateCatById = db.prepare(`UPDATE transactions
     SET category=@category, status='classified', note=COALESCE(@note,note),
-        merchant_place=COALESCE(@place,merchant_place), ai_suggested_category=NULL, ai_confidence=NULL
+        merchant_place=COALESCE(@place,merchant_place), ai_suggested_category=NULL, ai_confidence=NULL,
+        manually_edited=1
     WHERE id=@id AND user_id=@user_id`);
 
   function updateCategoryById(userId, id, category, { note = null, merchantPlace = null } = {}) {
@@ -277,7 +307,7 @@ export function createDb(dbPath, opts = {}) {
     const placeV = merchantPlace && String(merchantPlace).trim() ? String(merchantPlace).trim() : null;
     const upd = db.prepare(`UPDATE transactions SET category=?, status='classified',
       note=COALESCE(?,note), merchant_place=COALESCE(?,merchant_place),
-      ai_suggested_category=NULL, ai_confidence=NULL WHERE id=? AND user_id=?`);
+      ai_suggested_category=NULL, ai_confidence=NULL, manually_edited=1 WHERE id=? AND user_id=?`);
     db.exec('BEGIN');
     try { for (const id of ids) upd.run(category, noteV, placeV, id, userId); db.exec('COMMIT'); }
     catch (e) { db.exec('ROLLBACK'); throw e; }
@@ -327,7 +357,7 @@ export function createDb(dbPath, opts = {}) {
     createUser, getUserByEmail, getUserById, countUsers, getOwnerUserId,
     // transactions
     insertTransaction, getByMessageId, getById, listTransactions, getSummary,
-    getMonthly, getPending, updateCategoryById, updateCategoryByPattern, updateNote,
+    getMonthly, getByCategory, getPending, updateCategoryById, updateCategoryByPattern, updateNote,
     // overrides
     addOverride, getOverrides, normalizeMerchant,
     migrate, close, _raw: db,

@@ -16,6 +16,7 @@ import { createAuthRouter, createMeHandler } from './routes/auth.js';
 import { createJwt } from './auth/jwt.js';
 import { createLocalProvider } from './auth/providers/local.js';
 import { logger } from './logger.js';
+import { record5xx } from './ops-notify.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -103,6 +104,8 @@ export function createApp(deps) {
       return res.status(400).json({ status: 'error', error: 'Invalid JSON' });
     }
     logger.error('Барьцаагүй алдаа', { err: err?.message });
+    // Тогтвортой 5xx илэрвэл ops сэрэмжлүүлэг (record5xx дотроо debounce-той).
+    record5xx({ message: err?.message, code: err?.code });
     return res.status(500).json({ status: 'error', error: 'Internal Server Error' });
   });
 

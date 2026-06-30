@@ -118,6 +118,24 @@ export function createTransactionsRouter({ db, ai }) {
     }
   });
 
+  // ---- GET /api/transactions/:id — нэг гүйлгээний одоогийн төлөв ----
+  // (Discord bot interaction үед "stale эсэх"-ийг шалгахад ашиглана.)
+  // '/pending'-ийн ДАРАА бүртгэгдсэн тул түүнтэй мөргөлдөхгүй.
+  router.get('/:id', (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id)) {
+        return res.status(400).json({ status: 'error', error: 'буруу id' });
+      }
+      const row = db.getById(req.userId, id);
+      if (!row) return res.status(404).json({ status: 'error', error: 'Гүйлгээ олдсонгүй' });
+      return res.status(200).json({ status: 'ok', data: row });
+    } catch (err) {
+      logger.error('GET /:id алдаа', { err: err?.message });
+      return res.status(500).json({ status: 'error', error: 'Internal Server Error' });
+    }
+  });
+
   // ---- PATCH /api/transactions/:id/category — баталгаажуулах (ухаалаг) ----
   // Body: { category, applyToAll, note?, merchantPlace? (POS газрын нэр) }
   // POS бол merchantPlace (→override.friendly_name), POS биш бол note (→override.default_note).

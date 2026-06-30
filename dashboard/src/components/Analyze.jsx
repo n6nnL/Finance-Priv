@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api.js';
-import { money, catLabel, catEmoji, catHex, hexTint } from '../lib/format.js';
+import { money, catLabel, catEmoji, catHex } from '../lib/format.js';
 
 const PERIODS = [
   { id: 1, label: 'Энэ сар' },
@@ -13,68 +13,89 @@ function monthShort(m) {
   return match ? `${Number(match[2])}-р` : String(m || '').slice(0, 6);
 }
 
+function monthLabel(m) {
+  const x = String(m || '').match(/^(\d{4})-(\d{2})$/);
+  return x ? `${x[1]} оны ${Number(x[2])}-р сар` : String(m || '');
+}
+
+// API нь ангилаагүйг 'Ангилаагүй' мөрөөр буцаадаг. format.js-ийн emoji/өнгөний
+// тусгай (⏳ / улбар шар) дүрэм нь null-ээр түлхүүрлэдэг тул түүн рүү буулгана.
+const metaKey = (c) => (c === 'Ангилаагүй' ? null : c);
+
+const cardCls = 'bg-cream-card border border-cream-border rounded-card p-[22px]';
+
 export default function Analyze() {
   const [monthly, setMonthly] = useState([]);
-  const [summary, setSummary] = useState(null);
   const [period, setPeriod] = useState(6);
+  const [selMonth, setSelMonth] = useState('');
+  const [byCat, setByCat] = useState(null);
+  const [catLoading, setCatLoading] = useState(false);
   const [loading, setLoading] = useState(true);
 
+  // Сарын тренд + сонгогчийн жагсаалт
   useEffect(() => {
     setLoading(true);
-    Promise.all([api.monthly(12), api.summary({})])
-      .then(([m, s]) => { setMonthly(m.data || []); setSummary(s); })
+    api.monthly(12)
+      .then((m) => {
+        const rows = m.data || [];
+        setMonthly(rows);
+        // Хамгийн сүүлийн (хамгийн шинэ) сарыг анхдагчаар сонгоно
+        if (rows.length) setSelMonth(rows[rows.length - 1].month);
+      })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
 
+  // Сонгосон сарын ангиллын задаргаа (dedicated endpoint)
+  useEffect(() => {
+    if (!selMonth) return;
+    setCatLoading(true);
+    api.byCategory(selMonth)
+      .then(setByCat)
+      .catch(() => setByCat(null))
+      .finally(() => setCatLoading(false));
+  }, [selMonth]);
+
   if (loading) return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 200, color: '#A39A8A', fontSize: 14 }}>
+    <div className="flex items-center justify-center h-[200px] text-[#A39A8A] text-[14px]">
       Ачаалж байна...
     </div>
   );
 
   const shown = monthly.slice(-period);
   const maxV = Math.max(1, ...shown.flatMap(m => [m.income || 0, m.expense || 0]));
+  const monthOptions = [...monthly].reverse().map(m => m.month);
 
-  const expByCat = {};
-  for (const r of summary?.byCategory || []) {
-    if (r.type === 'expense') {
-      const key = r.category ?? '_null_';
-      expByCat[key] = (expByCat[key] || 0) + r.total;
-    }
-  }
-  const cats = Object.entries(expByCat).sort((a, b) => b[1] - a[1]);
-  const totalExp = cats.reduce((s, [, v]) => s + v, 0) || 1;
-
+  // Donut segments — ТОГТМОЛ өнгө (catHex), эмодзи (catEmoji) ашиглана
+  const cats = byCat?.byCategory || [];
+  const totalExp = byCat?.totalExpense || 0;
+  const totalInc = byCat?.totalIncome || 0;
+  const denom = totalExp || 1;
   const R = 48, C = 2 * Math.PI * R;
   let acc = 0;
-  const donut = cats.map(([cat, val]) => {
-    const realCat = cat === '_null_' ? null : cat;
-    const len = (val / totalExp) * C;
-    const seg = { hex: catHex(realCat), dash: len, gap: C - len, offset: acc, cat: realCat, val };
+  const donut = cats.map((row) => {
+    const len = (row.total / denom) * C;
+    const seg = { hex: catHex(metaKey(row.category)), dash: len, gap: C - len, offset: acc };
     acc += len;
     return seg;
   });
 
-  const card = { background: '#FFFDF9', border: '1px solid #EAE1D3', borderRadius: 18, padding: 22 };
-
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+    <div className="flex flex-col gap-[18px]">
       {/* Period tabs */}
-      <div style={{ display: 'flex', gap: 8 }}>
+      <div className="flex gap-[8px]">
         {PERIODS.map(p => {
           const active = period === p.id;
           return (
             <button
               key={p.id}
               onClick={() => setPeriod(p.id)}
+              className="h-[38px] px-[16px] border rounded-full font-body text-[13.5px] cursor-pointer"
               style={{
-                height: 38, padding: '0 16px',
-                border: `1px solid ${active ? '#1F7A6B' : '#EAE1D3'}`,
+                borderColor: active ? '#1F7A6B' : '#EAE1D3',
                 background: active ? '#1F7A6B' : '#FFFDF9',
                 color: active ? '#fff' : '#6E665A',
-                borderRadius: 999, fontFamily: 'Onest', fontWeight: active ? 600 : 500,
-                fontSize: 13.5, cursor: 'pointer',
+                fontWeight: active ? 600 : 500,
               }}
             >
               {p.label}
@@ -84,88 +105,107 @@ export default function Analyze() {
       </div>
 
       {/* Monthly trend chart */}
-      <div style={card}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6, flexWrap: 'wrap', gap: 8 }}>
-          <div style={{ fontFamily: 'Rubik', fontWeight: 600, fontSize: 17 }}>Сарын тренд</div>
-          <div style={{ display: 'flex', gap: 16, fontSize: 12.5, color: '#8C8578' }}>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ width: 10, height: 10, borderRadius: 3, background: '#2E9E5B', display: 'inline-block' }} />Орлого
+      <div className={cardCls}>
+        <div className="flex items-center justify-between mb-[6px] flex-wrap gap-[8px]">
+          <div className="font-display font-semibold text-[17px]">Сарын тренд</div>
+          <div className="flex gap-[16px] text-[13px] text-[#8C8578]">
+            <span className="flex items-center gap-[6px]">
+              <span className="w-[10px] h-[10px] rounded-[3px] bg-[#2E9E5B] inline-block" />Орлого
             </span>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ width: 10, height: 10, borderRadius: 3, background: '#D8483B', display: 'inline-block' }} />Зарлага
+            <span className="flex items-center gap-[6px]">
+              <span className="w-[10px] h-[10px] rounded-[3px] bg-[#D8483B] inline-block" />Зарлага
             </span>
           </div>
         </div>
 
         {shown.length === 0 ? (
-          <div style={{ color: '#A39A8A', fontSize: 14, padding: '20px 0' }}>Өгөгдөл алга</div>
+          <div className="text-[#A39A8A] text-[14px] py-[20px]">Өгөгдөл алга</div>
         ) : (
-          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 14, height: 210, paddingTop: 24 }}>
-            {shown.map(m => (
-              <div key={m.month} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, height: '100%', justifyContent: 'flex-end' }}>
-                <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: '100%', width: '100%', justifyContent: 'center' }}>
-                  <div style={{ width: 14, background: 'linear-gradient(180deg,#3BB572,#2E9E5B)', borderRadius: '6px 6px 0 0', height: `${((m.income || 0) / maxV) * 100}%`, minHeight: (m.income || 0) > 0 ? 4 : 0 }} />
-                  <div style={{ width: 14, background: 'linear-gradient(180deg,#E55A4D,#D8483B)', borderRadius: '6px 6px 0 0', height: `${((m.expense || 0) / maxV) * 100}%`, minHeight: (m.expense || 0) > 0 ? 4 : 0 }} />
+          <div className="overflow-x-auto">
+            <div className="flex items-end gap-[14px] h-[210px] pt-[24px]">
+              {shown.map(m => (
+                <div key={m.month} className="flex-1 min-w-[36px] flex flex-col items-center gap-[8px] h-full justify-end">
+                  <div className="flex items-end gap-[4px] h-full w-full justify-center">
+                    <div className="w-[14px] rounded-t-[6px]" style={{ background: 'linear-gradient(180deg,#3BB572,#2E9E5B)', height: `${((m.income || 0) / maxV) * 100}%`, minHeight: (m.income || 0) > 0 ? 4 : 0 }} />
+                    <div className="w-[14px] rounded-t-[6px]" style={{ background: 'linear-gradient(180deg,#E55A4D,#D8483B)', height: `${((m.expense || 0) / maxV) * 100}%`, minHeight: (m.expense || 0) > 0 ? 4 : 0 }} />
+                  </div>
+                  <span className="text-[13px] text-[#8C8578] font-medium whitespace-nowrap">{monthShort(m.month)}</span>
                 </div>
-                <span style={{ fontSize: 12, color: '#8C8578', fontWeight: 500, whiteSpace: 'nowrap' }}>{monthShort(m.month)}</span>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
         )}
       </div>
 
-      {/* Breakdown */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 18 }} className="lg:grid-cols-[minmax(0,300px)_1fr]">
-        {/* Donut */}
-        <div style={{ ...card, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-          <div style={{ fontFamily: 'Rubik', fontWeight: 600, fontSize: 17, alignSelf: 'flex-start', marginBottom: 18 }}>Зарлагын бүтэц</div>
-          {cats.length === 0 ? (
-            <div style={{ color: '#A39A8A', fontSize: 14 }}>Өгөгдөл алга</div>
-          ) : (
-            <div style={{ position: 'relative', width: 200, height: 200 }}>
-              <svg viewBox="0 0 120 120" width="200" height="200" style={{ transform: 'rotate(-90deg)' }}>
-                <circle cx="60" cy="60" r="48" fill="none" stroke="#F2EADC" strokeWidth="16" />
-                {donut.map((seg, i) => (
-                  <circle key={i} cx="60" cy="60" r="48" fill="none" stroke={seg.hex} strokeWidth="16"
-                    strokeDasharray={`${seg.dash} ${seg.gap}`} strokeDashoffset={-seg.offset} />
-                ))}
-              </svg>
-              <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-                <div style={{ fontSize: 12, color: '#8C8578' }}>Нийт зарлага</div>
-                <div style={{ fontFamily: 'Rubik', fontWeight: 600, fontSize: 18, color: '#D8483B' }}>{money(totalExp)}</div>
-              </div>
-            </div>
-          )}
+      {/* Сарын ангиллын задаргаа (dedicated endpoint, сар сонгогчтой) */}
+      <div className={cardCls}>
+        <div className="flex items-center justify-between mb-[18px] flex-wrap gap-[10px]">
+          <div className="font-display font-semibold text-[17px]">Мөнгө юунд урссан</div>
+          <select
+            value={selMonth}
+            onChange={(e) => setSelMonth(e.target.value)}
+            aria-label="Сар сонгох"
+            className="h-[36px] px-[12px] border border-cream-border bg-cream-card text-[#3A352C] rounded-[10px] font-body font-medium text-[13.5px] cursor-pointer"
+          >
+            {monthOptions.length === 0 && <option value="">—</option>}
+            {monthOptions.map((m) => <option key={m} value={m}>{monthLabel(m)}</option>)}
+          </select>
         </div>
 
-        {/* Category bars */}
-        <div style={card}>
-          <div style={{ fontFamily: 'Rubik', fontWeight: 600, fontSize: 17, marginBottom: 18 }}>Мөнгө юунд урссан</div>
-          {cats.length === 0 ? (
-            <div style={{ color: '#A39A8A', fontSize: 14 }}>Өгөгдөл алга</div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 15 }}>
-              {cats.map(([rawCat, val]) => {
-                const cat = rawCat === '_null_' ? null : rawCat;
-                const pct = Math.round(val / totalExp * 100);
-                const hex = catHex(cat);
+        {catLoading ? (
+          <div className="text-[#A39A8A] text-[14px] py-[24px] text-center">Ачаалж байна...</div>
+        ) : cats.length === 0 ? (
+          <div className="text-[#A39A8A] text-[14px] py-[28px] text-center">
+            {monthLabel(selMonth)}-д зарлага алга.
+            {totalInc > 0 && <div className="mt-[8px] text-[#2E9E5B] font-semibold">Орлого: +{money(totalInc)}</div>}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,240px)_1fr] gap-[22px]">
+            {/* Donut */}
+            <div className="flex flex-col items-center gap-[12px]">
+              <div className="relative w-[200px] h-[200px]">
+                <svg viewBox="0 0 120 120" width="200" height="200" style={{ transform: 'rotate(-90deg)' }}>
+                  <circle cx="60" cy="60" r="48" fill="none" stroke="#F2EADC" strokeWidth="16" />
+                  {donut.map((seg, i) => (
+                    <circle key={i} cx="60" cy="60" r="48" fill="none" stroke={seg.hex} strokeWidth="16"
+                      strokeDasharray={`${seg.dash} ${seg.gap}`} strokeDashoffset={-seg.offset} />
+                  ))}
+                </svg>
+                <div className="absolute inset-0 flex flex-col items-center justify-center">
+                  <div className="text-[13px] text-[#8C8578]">Нийт зарлага</div>
+                  <div className="font-display font-semibold text-[18px] text-[#D8483B]">{money(totalExp)}</div>
+                </div>
+              </div>
+              {totalInc > 0 && (
+                <div className="text-[13px] text-[#8C8578]">
+                  Орлого: <span className="text-[#2E9E5B] font-semibold">+{money(totalInc)}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Legend / category bars (эмодзи + нэр + тогтмол өнгө) */}
+            <div className="flex flex-col gap-[15px]">
+              {cats.map((row) => {
+                const pct = Math.round((row.total / denom) * 100);
+                const hex = catHex(metaKey(row.category));
                 return (
-                  <div key={rawCat}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 7 }}>
-                      <span style={{ fontSize: 17 }}>{catEmoji(cat)}</span>
-                      <span style={{ fontWeight: 500, fontSize: 14, flex: 1 }}>{catLabel(cat)}</span>
-                      <span style={{ fontSize: 13, color: '#8C8578', fontWeight: 500 }}>{pct}%</span>
-                      <span style={{ fontFamily: 'Rubik', fontWeight: 600, fontSize: 14, minWidth: 84, textAlign: 'right' }}>{money(val)}</span>
+                  <div key={row.category}>
+                    <div className="flex items-center gap-[9px] mb-[7px]">
+                      <span className="text-[17px]">{catEmoji(metaKey(row.category))}</span>
+                      <span className="font-medium text-[14px] flex-1">{catLabel(metaKey(row.category))}</span>
+                      <span className="text-[13px] text-[#A39A8A]">{row.count}×</span>
+                      <span className="text-[13px] text-[#8C8578] font-medium">{pct}%</span>
+                      <span className="font-display font-semibold text-[14px] min-w-[84px] text-right">{money(row.total)}</span>
                     </div>
-                    <div style={{ height: 9, background: '#F2EADC', borderRadius: 999, overflow: 'hidden' }}>
-                      <div style={{ height: '100%', width: `${pct}%`, background: hex, borderRadius: 999 }} />
+                    <div className="h-[9px] bg-[#F2EADC] rounded-full overflow-hidden">
+                      <div className="h-full rounded-full" style={{ width: `${pct}%`, background: hex }} />
                     </div>
                   </div>
                 );
               })}
             </div>
-          )}
-        </div>
+          </div>
+        )}
       </div>
     </div>
   );

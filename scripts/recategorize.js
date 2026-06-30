@@ -43,12 +43,15 @@ const setPending = db._raw.prepare(
 );
 
 const counts = {};
-let viaOverride = 0, viaIncome = 0, viaKeyword = 0, toPending = 0;
+let viaOverride = 0, viaIncome = 0, viaKeyword = 0, toPending = 0, manualKept = 0;
 const bump = (c) => { counts[c] = (counts[c] || 0) + 1; };
 
 db._raw.exec('BEGIN');
 try {
   for (const r of rows) {
+    // ⚠️ Хэрэглэгч гараар баталгаажуулсан мөрийг ХЭЗЭЭ Ч дахин ангилахгүй.
+    if (r.manually_edited === 1) { manualKept++; if (r.category) bump(r.category); continue; }
+
     const norm = db.normalizeMerchant(r.description);
     const ov = norm ? overrides.find((o) => o.merchant_pattern && norm.includes(o.merchant_pattern)) : null;
 
@@ -78,6 +81,7 @@ console.log('📊 RECATEGORIZE ТАЙЛАН (10 ангиллын систем)')
 console.log('============================================================');
 console.log('Override ангилал шинэ нэр рүү буулгасан:', ovMigrated);
 console.log('Override-оор:', viaOverride, '| Орлого:', viaIncome, '| Keyword:', viaKeyword, '| pending:', toPending);
+console.log('Гар засвар (хөндөөгүй):', manualKept);
 console.log('\nАнгилал тус бүрээр:');
 for (const [c, n] of Object.entries(counts).sort((a, b) => b[1] - a[1])) {
   console.log('  ' + String(n).padStart(4), c);

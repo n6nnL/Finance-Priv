@@ -19,6 +19,7 @@ import { OAuth2Client } from 'google-auth-library';
 import { config } from './config.js';
 import { logger } from './logger.js';
 import { notifyError } from './logger.js';
+import { notifyOpsRecovered } from './ops-notify.js';
 import {
   getLastSeenUid,
   setLastSeenUid,
@@ -113,6 +114,11 @@ export class ImapListener {
     await this.client.connect();
     logger.info({ user: config.gmail.user }, '✅ Gmail IMAP холбогдлоо');
     this.consecutiveFailures = 0;
+    // Амжилттай холболт = token refresh ч бас амжилттай. Өмнө асаж байсан
+    // OAuth/reconnect сэрэмжлүүлэг байвал ЯГ нэг "✅ recovered" илгээнэ
+    // (асаагүй байсан бол no-op).
+    notifyOpsRecovered('oauth-invalid-grant', 'Gmail IMAP дахин холбогдлоо');
+    notifyOpsRecovered('imap-reconnect-loop', 'Gmail IMAP дахин холбогдлоо');
 
     // mailbox нээх. imapflow нь mailbox нээгдсэний дараа сул зуураа
     // автоматаар IDLE барьж, шинэ имэйл ирэхэд 'exists' event асаана.
@@ -299,9 +305,14 @@ export class ImapListener {
           { err: err?.message, failures: this.consecutiveFailures, backoffMs: this.backoffMs },
           'Холболт алдаа — reconnect хийнэ'
         );
-        // Дараалсан олон алдаа гарвал мэдэгдэнэ
-        if (this.consecutiveFailures >= 5) {
-          await notifyError('reconnect-failures', err);
+        // OAuth invalid_grant нь бараг хэзээ ч түр зуурын биш — ЭХНИЙ удаад
+        // сэрэмжлүүлнэ (incident: 88 цикл чимээгүй байсан). Бусад тасрал нь
+        // дараалсан 5 удаа давтагдвал "reconnect loop" гэж үзнэ.
+        // (notifyError доторх ops-notify debounce давталтыг 15 мин дарна.)
+        if (/invalid_grant/i.test(err?.message || '')) {
+          await notifyError('oauth-invalid-grant', err);
+        } else if (this.consecutiveFailures >= 5) {
+          await notifyError('imap-reconnect-loop', err);
         }
         await this.closeClient();
         if (this.stopped) break;

@@ -12,36 +12,43 @@ export default function PendingReview({ items, total, categories, onConfirmed })
 
   return (
     <>
-      <div style={{ background: 'linear-gradient(135deg,#FFF6E9,#FFEFD6)', border: '1.5px solid #F4DDB0', borderRadius: 18, padding: '18px 20px', marginBottom: 22 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-          <div style={{ width: 32, height: 32, borderRadius: 10, background: '#F0A93C', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16 }}>⚡</div>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 600, fontSize: 15, color: '#8A5A12' }}>
+      <div
+        className="border-[1.5px] border-[#F4DDB0] rounded-card py-[18px] px-[20px] mb-[22px]"
+        style={{ background: 'linear-gradient(135deg,#FFF6E9,#FFEFD6)' }}
+      >
+        <div className="flex items-center gap-[10px] mb-[14px]">
+          <div className="w-[32px] h-[32px] rounded-[10px] bg-[#F0A93C] flex items-center justify-center text-[16px]">⚡</div>
+          <div className="flex-1">
+            <div className="font-semibold text-[15px] text-[#8A5A12]">
               {total} гүйлгээ ангилахыг хүлээж байна
             </div>
-            <div style={{ fontSize: 13, color: '#A87C36' }}>Систем автоматаар барьлаа — та зөвхөн баталгаажуулна уу</div>
+            <div className="text-[13px] text-[#A87C36]">Систем автоматаар барьлаа — та зөвхөн баталгаажуулна уу</div>
           </div>
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+        <div className="flex flex-col gap-[9px]">
           {items.map(t => (
-            <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 13, background: '#FFFDF9', border: '1px solid #F1E4CC', borderRadius: 13, padding: '12px 14px' }}>
-              <div style={{ width: 38, height: 38, borderRadius: 11, background: '#F3ECDD', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>
+            <div key={t.id} className="flex items-start sm:items-center gap-[13px] bg-cream-card border border-[#F1E4CC] rounded-[13px] py-[12px] px-[14px]">
+              <div className="w-[38px] h-[38px] shrink-0 rounded-[11px] bg-[#F3ECDD] flex items-center justify-center text-[18px]">
                 {t.ai_suggested_category ? catEmoji(t.ai_suggested_category) : '🔔'}
               </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 600, fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{displayDesc(t)}</div>
-                <div style={{ fontSize: 12, color: '#A39A8A' }}>{t.txn_date}{t.account_last4 ? ` · ••${t.account_last4}` : ''}</div>
+              <div className="min-w-0 flex-1 flex flex-col gap-[8px] sm:flex-row sm:items-center sm:gap-[13px]">
+                <div className="min-w-0 flex-1">
+                  <div className="font-semibold text-[14px] truncate">{displayDesc(t)}</div>
+                  <div className="text-[13px] text-[#A39A8A] whitespace-nowrap">{t.txn_date}{t.account_last4 ? ` · ••${t.account_last4}` : ''}</div>
+                </div>
+                <div className="flex items-center justify-between gap-[12px] sm:justify-end">
+                  <div className="font-display font-semibold text-[15px] whitespace-nowrap" style={{ color: t.type === 'income' ? '#2E9E5B' : '#D8483B' }}>
+                    {t.type === 'income' ? '+' : '−'}{money(t.amount)}
+                  </div>
+                  <button
+                    onClick={() => setEditingId(t.id)}
+                    className="shrink-0 border-none bg-[#1F7A6B] text-white font-body font-semibold text-[13px] py-[9px] px-[15px] rounded-[10px] cursor-pointer whitespace-nowrap"
+                  >
+                    Ангилах
+                  </button>
+                </div>
               </div>
-              <div style={{ fontFamily: 'Rubik', fontWeight: 600, fontSize: 15, color: t.type === 'income' ? '#2E9E5B' : '#D8483B', whiteSpace: 'nowrap' }}>
-                {t.type === 'income' ? '+' : '−'}{money(t.amount)}
-              </div>
-              <button
-                onClick={() => setEditingId(t.id)}
-                style={{ border: 'none', background: '#1F7A6B', color: '#fff', fontFamily: 'Onest', fontWeight: 600, fontSize: 13, padding: '9px 15px', borderRadius: 10, cursor: 'pointer', whiteSpace: 'nowrap' }}
-              >
-                Ангилах
-              </button>
             </div>
           ))}
         </div>
@@ -85,50 +92,53 @@ function ConfirmModal({ t, categories, onClose, onSaved }) {
   return (
     <div
       onClick={onClose}
-      style={{ position: 'fixed', inset: 0, background: 'rgba(42,39,34,.42)', backdropFilter: 'blur(3px)', zIndex: 50, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}
+      className="fixed inset-0 bg-[rgba(42,39,34,0.42)] backdrop-blur-[3px] z-50 flex items-end justify-center"
     >
       <div
         onClick={e => e.stopPropagation()}
-        style={{ background: '#FFFDF9', width: '100%', maxWidth: 480, borderRadius: '24px 24px 0 0', maxHeight: '92vh', overflowY: 'auto', boxShadow: '0 -10px 40px rgba(0,0,0,.18)' }}
+        className="bg-cream-card w-full max-w-[480px] rounded-t-[24px] max-h-[92vh] overflow-y-auto shadow-[0_-10px_40px_rgba(0,0,0,0.18)]"
       >
         {/* Modal header */}
-        <div style={{ padding: '20px 22px 14px', position: 'sticky', top: 0, background: '#FFFDF9', borderBottom: '1px solid #F2EADC', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div className="pt-[20px] px-[22px] pb-[14px] sticky top-0 bg-cream-card border-b border-[#F2EADC] flex items-center justify-between">
           <div>
-            <div style={{ fontFamily: 'Rubik', fontWeight: 600, fontSize: 18 }}>Гүйлгээ баталгаажуулах</div>
-            <div style={{ fontSize: 12.5, color: '#A39A8A', marginTop: 2 }}>Систем барьсан — ангилаад хадгал</div>
+            <div className="font-display font-semibold text-[18px]">Гүйлгээ баталгаажуулах</div>
+            <div className="text-[13px] text-[#A39A8A] mt-[2px]">Систем барьсан — ангилаад хадгал</div>
           </div>
-          <button onClick={onClose} style={{ width: 32, height: 32, border: 'none', background: '#F2EADC', borderRadius: '50%', cursor: 'pointer', fontSize: 16, color: '#8C8578', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
+          <button onClick={onClose} className="w-[32px] h-[32px] border-none bg-[#F2EADC] rounded-full cursor-pointer text-[16px] text-[#8C8578] flex items-center justify-center">✕</button>
         </div>
 
-        <div style={{ padding: '20px 22px 24px' }}>
+        <div className="pt-[20px] px-[22px] pb-[24px]">
           {/* Transaction preview */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 13, background: '#FBF6EC', border: '1px solid #F0E6D4', borderRadius: 14, padding: '14px 16px', marginBottom: 22 }}>
-            <div style={{ width: 46, height: 46, borderRadius: 13, background: cat ? hexTint(catHex(cat), 0.15) : '#F3ECDD', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22 }}>
+          <div className="flex items-center gap-[13px] bg-[#FBF6EC] border border-[#F0E6D4] rounded-[14px] py-[14px] px-[16px] mb-[22px]">
+            <div
+              className="w-[46px] h-[46px] rounded-[13px] flex items-center justify-center text-[22px]"
+              style={{ background: cat ? hexTint(catHex(cat), 0.15) : '#F3ECDD' }}
+            >
               {cat ? catEmoji(cat) : '🔔'}
             </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontWeight: 600, fontSize: 15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{displayDesc(t)}</div>
-              <div style={{ fontSize: 12.5, color: '#A39A8A' }}>{t.txn_date}{t.account_last4 ? ` · ••${t.account_last4}` : ''}</div>
+            <div className="flex-1 min-w-0">
+              <div className="font-semibold text-[15px] truncate">{displayDesc(t)}</div>
+              <div className="text-[13px] text-[#A39A8A]">{t.txn_date}{t.account_last4 ? ` · ••${t.account_last4}` : ''}</div>
             </div>
-            <div style={{ fontFamily: 'Rubik', fontWeight: 600, fontSize: 18, color: t.type === 'income' ? '#2E9E5B' : '#D8483B', flexShrink: 0 }}>
+            <div className="font-display font-semibold text-[18px] shrink-0" style={{ color: t.type === 'income' ? '#2E9E5B' : '#D8483B' }}>
               {t.type === 'income' ? '+' : '−'}{money(t.amount)}
             </div>
           </div>
 
           {/* Note input */}
-          <label style={{ display: 'block', fontSize: 13, fontWeight: 500, color: '#6E665A', marginBottom: 7 }}>
+          <label className="block text-[13px] font-medium text-[#6E665A] mb-[7px]">
             {isPos ? 'Газрын нэр' : 'Юунд зарцуулсан бэ?'}
           </label>
           <input
             value={note}
             onChange={e => setNote(e.target.value)}
             placeholder={isPos ? 'ж: Тэнгис кино театр' : 'ж: Ээжийн сарын мөнгө'}
-            style={{ width: '100%', height: 48, padding: '0 15px', border: '1.5px solid #E3DACB', borderRadius: 13, background: '#fff', fontFamily: 'Onest', fontSize: 15, color: '#2A2722', outline: 'none', marginBottom: 22, boxSizing: 'border-box' }}
+            className="w-full h-[48px] px-[15px] border-[1.5px] border-cream-input rounded-[13px] bg-white font-body text-[15px] text-[#2A2722] outline-none mb-[22px]"
           />
 
           {/* Category chips */}
-          <label style={{ display: 'block', fontSize: 13, fontWeight: 500, color: '#6E665A', marginBottom: 10 }}>Ангилал сонгох</label>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 8, marginBottom: 24 }}>
+          <label className="block text-[13px] font-medium text-[#6E665A] mb-[10px]">Ангилал сонгох</label>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-[8px] mb-[24px]">
             {categories.map(c => {
               const sel = cat === c;
               const isSug = !cat && c === suggest;
@@ -137,35 +147,38 @@ function ConfirmModal({ t, categories, onClose, onSaved }) {
                 <button
                   key={c}
                   onClick={() => setCat(c)}
+                  className="flex items-center gap-[9px] py-[11px] px-[12px] border-[1.5px] rounded-[13px] cursor-pointer font-body text-[13.5px] text-left"
                   style={{
-                    display: 'flex', alignItems: 'center', gap: 9,
-                    padding: '11px 12px',
-                    border: `1.5px solid ${sel ? hex : isSug ? 'rgba(240,169,60,.55)' : '#EFE6D6'}`,
+                    borderColor: sel ? hex : isSug ? 'rgba(240,169,60,.55)' : '#EFE6D6',
                     background: sel ? hexTint(hex, 0.14) : isSug ? 'rgba(240,169,60,.08)' : '#FFFDF9',
-                    borderRadius: 13, cursor: 'pointer',
-                    fontFamily: 'Onest', fontSize: 13.5, fontWeight: sel ? 600 : 500,
-                    color: sel ? hex : '#4A453D', textAlign: 'left',
+                    fontWeight: sel ? 600 : 500,
+                    color: sel ? hex : '#4A453D',
                   }}
                 >
-                  <span style={{ fontSize: 17, flexShrink: 0 }}>{catEmoji(c)}</span>
-                  <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{catLabel(c)}</span>
-                  {isSug && <span style={{ fontSize: 13, color: '#F0A93C', flexShrink: 0 }}>★</span>}
+                  <span className="text-[17px] shrink-0">{catEmoji(c)}</span>
+                  <span className="flex-1 truncate">{catLabel(c)}</span>
+                  {isSug && <span className="text-[13px] text-[#F0A93C] shrink-0">★</span>}
                 </button>
               );
             })}
           </div>
 
-          {err && <div style={{ color: '#D8483B', fontSize: 13, marginBottom: 12 }}>{err}</div>}
+          {err && <div className="text-[#D8483B] text-[13px] mb-[12px]">{err}</div>}
 
           {/* Buttons */}
-          <div style={{ display: 'flex', gap: 11 }}>
-            <button onClick={onClose} style={{ flexShrink: 0, padding: '0 20px', height: 52, border: '1.5px solid #E3DACB', background: '#fff', borderRadius: 14, fontFamily: 'Onest', fontWeight: 600, fontSize: 15, color: '#6E665A', cursor: 'pointer' }}>
+          <div className="flex gap-[11px]">
+            <button onClick={onClose} className="shrink-0 px-[20px] h-[52px] border-[1.5px] border-cream-input bg-white rounded-[14px] font-body font-semibold text-[15px] text-[#6E665A] cursor-pointer">
               Болих
             </button>
             <button
               onClick={save}
               disabled={disabled}
-              style={{ flex: 1, height: 52, border: 'none', borderRadius: 14, background: disabled ? '#E7DECF' : '#1F7A6B', color: disabled ? '#B7AD9C' : '#fff', fontFamily: 'Onest', fontWeight: 600, fontSize: 16, cursor: disabled ? 'not-allowed' : 'pointer' }}
+              className="flex-1 h-[52px] border-none rounded-[14px] font-body font-semibold text-[16px]"
+              style={{
+                background: disabled ? '#E7DECF' : '#1F7A6B',
+                color: disabled ? '#B7AD9C' : '#fff',
+                cursor: disabled ? 'not-allowed' : 'pointer',
+              }}
             >
               {busy ? 'Хадгалж байна...' : !cat ? 'Ангилал сонгоно уу' : 'Баталгаажуулах'}
             </button>

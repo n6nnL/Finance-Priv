@@ -88,7 +88,8 @@ async function main() {
       if (r.txn_date == null && !p.date) stillMissingDate++;
 
       // Шинээр тайлбар задарсан + pending + хэрэглэгч ангилаагүй → categorize дахин
-      if (descWasFilled && r.status === 'pending_review' && r.category == null) {
+      // ⚠️ Хэрэглэгч гараар баталгаажуулсан (manually_edited) мөрийг ХӨНДӨХГҮЙ.
+      if (descWasFilled && r.status === 'pending_review' && r.category == null && r.manually_edited !== 1) {
         const cat = categorizeByRules(finalDesc);
         if (cat) {
           db._raw.prepare("UPDATE transactions SET category=?, status='classified', ai_suggested_category=NULL, ai_confidence=NULL WHERE id=?").run(cat, r.id);

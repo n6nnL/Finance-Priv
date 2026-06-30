@@ -9,6 +9,7 @@ import { createApp } from './app.js';
 import { createAi } from './ai.js';
 import { hashPasswordSync } from './auth/passwordHash.js';
 import { logger } from './logger.js';
+import { notifyOps } from './ops-notify.js';
 
 // Анхны admin-г seed хийх (users хоосон үед). Нууц үг hash хийгдэнэ.
 const seed = config.auth.seedPassword
@@ -56,7 +57,9 @@ process.on('SIGTERM', () => shutdown('SIGTERM'));
 
 process.on('unhandledRejection', (reason) => {
   logger.error('unhandledRejection', { reason: reason?.message ?? String(reason) });
+  notifyOps('unhandledRejection', reason).catch(() => {});
 });
 process.on('uncaughtException', (err) => {
   logger.error('uncaughtException', { err: err?.message, stack: err?.stack });
+  notifyOps('uncaughtException', err).catch(() => {});
 });

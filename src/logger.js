@@ -27,17 +27,24 @@ export const logger = pino({
 
 // ------------------------------------------------------------
 // notifyError() — Чухал алдаа гарвал дуудах ганц цэг.
-// Одоохондоо зүгээр л error log хийнэ. Дараа Telegram/имэйл/Slack
-// залгахад энэ функцийн дотор нэмнэ (интерфэйс өөрчлөгдөхгүй).
+// Локал error log + бие даасан Discord webhook сэрэмжлүүлэг (ops-notify).
+// Бүх catch block ба process-level handler энэ цэгээр дамждаг тул
+// сэрэмжлүүлгийг ЭНД залгаснаар бүгдийг автоматаар хамруулна.
 // ------------------------------------------------------------
 export async function notifyError(context, error) {
   logger.error(
     { context, err: error?.message ?? String(error), stack: error?.stack },
     `🚨 NOTIFY: ${context}`
   );
-  // TODO: энд Telegram bot / имэйл / Slack webhook залгаж болно.
-  // Жишээ:
-  //   await fetch(TELEGRAM_URL, { method: 'POST', body: ... });
+  // ops-notify нь debounce-той, scrub-той, хэзээ ч throw хийхгүй.
+  // Динамик import — циклик хамаарал (logger ↔ ops-notify) болон
+  // webhook тохируулаагүй үед ачааллыг хөнгөн байлгана.
+  try {
+    const { notifyOps } = await import('./ops-notify.js');
+    await notifyOps(context, error);
+  } catch {
+    /* сэрэмжлүүлэгч хэзээ ч үндсэн урсгалыг зогсоохгүй */
+  }
 }
 
 export default logger;

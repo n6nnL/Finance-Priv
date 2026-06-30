@@ -21,12 +21,18 @@ async function req(path, { method = 'GET', body } = {}, retries = 3) {
       });
       clearTimeout(timer);
       const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(`HTTP ${res.status}: ${json.error || ''}`);
-      return json;
+      if (res.ok) return json;
+      const err = new Error(`HTTP ${res.status}: ${json.error || ''}`);
+      err.status = res.status;
+      // 4xx (404 г.м) нь дахин оролдоод нэмэргүй — шууд таслана (interaction-ийн
+      // 3с төсвийг хэмнэнэ). Зөвхөн 5xx/network-ийг retry хийнэ.
+      if (res.status >= 400 && res.status < 500) throw err;
+      lastErr = err;
     } catch (e) {
+      if (e?.status >= 400 && e?.status < 500) throw e;
       lastErr = e;
-      if (attempt < retries) await sleep(1000 * attempt);
     }
+    if (attempt < retries) await sleep(1000 * attempt);
   }
   throw lastErr;
 }
@@ -42,4 +48,18 @@ export function patchCategory(id, { category, applyToAll = true, merchantPlace, 
   });
 }
 
-export default { patchCategory };
+/**
+ * Нэг гүйлгээний ОДООГИЙН төлөвийг API-аас татах (interaction үед "stale эсэх"
+ * шалгахад). Олдохгүй бол (404) null буцаана — алдаа шиддэхгүй.
+ */
+export async function getTransaction(id) {
+  try {
+    const j = await req(`/api/transactions/${id}`);
+    return j.data ?? null;
+  } catch (e) {
+    if (e?.status === 404) return null;
+    throw e;
+  }
+}
+
+export default { patchCategory, getTransaction };
