@@ -24,6 +24,22 @@ export const CATEGORIES = [
   'Бусад',
 ];
 
+// Ангилал бүрийн харагдах metadata (emoji + hex) — ★ single source.
+// Backend болон dashboard хоёул эндээс авна (format.js импортолдог) — нэрийг
+// хоёр газар давхар бичихгүй. Зөвхөн канон 10 ангилал; танигдаагүйд default.
+export const CATEGORY_META = {
+  'Гадуур хооллолт':            { emoji: '🍽️', hex: '#E8703A' },
+  'Хүнсний зүйл':               { emoji: '🛒', hex: '#4F9D69' },
+  'Тээвэр':                     { emoji: '🚗', hex: '#E0A33E' },
+  'Орлого':                     { emoji: '💰', hex: '#2E9E5B' },
+  'Шилжүүлэг & гэр бүл':       { emoji: '💸', hex: '#C2698F' },
+  'Захиалга & сервис':          { emoji: '📱', hex: '#3FA9A0' },
+  'Боловсрол':                   { emoji: '📚', hex: '#5566B5' },
+  'Чөлөөт цаг / зугаа цэнгэл':  { emoji: '🎬', hex: '#8B6FB8' },
+  'Хувцас / гоо сайхан':       { emoji: '👕', hex: '#D86A92' },
+  'Бусад':                       { emoji: '📦', hex: '#8A8275' },
+};
+
 // type==='income' үед автоматаар оногдох ангилал
 export const INCOME_CATEGORY = 'Орлого';
 
@@ -101,4 +117,4 @@ export const OLD_TO_NEW = {
   other: 'Бусад',
 };
 
-export default { CATEGORIES, CATEGORY_RULES, INCOME_CATEGORY, DEFAULT_CATEGORY, OLD_TO_NEW };
+export default { CATEGORIES, CATEGORY_META, CATEGORY_RULES, INCOME_CATEGORY, DEFAULT_CATEGORY, OLD_TO_NEW };

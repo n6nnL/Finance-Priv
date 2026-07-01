@@ -1,3 +1,7 @@
+// Ангиллын нэр/metadata (emoji/hex) + хуучин нэрийн mapping нь config/categories.js-д
+// (★ single source). Энд зөвхөн frontend-ийн Tailwind badge өнгө + туслах функц.
+import { OLD_TO_NEW, CATEGORY_META } from '../../../config/categories.js';
+
 export const CATEGORY_COLORS = {
   'Гадуур хооллолт': 'bg-green-100 text-green-800',
   'Хүнсний зүйл': 'bg-lime-100 text-lime-800',
@@ -11,46 +15,24 @@ export const CATEGORY_COLORS = {
   'Бусад': 'bg-slate-200 text-slate-700',
 };
 
-const OLD_KEY_TO_NEW = {
-  food: 'Гадуур хооллолт', transport: 'Тээвэр', wallet: 'Захиалга & сервис',
-  subscription: 'Захиалга & сервис', bills: 'Захиалга & сервис',
-  transfer: 'Шилжүүлэг & гэр бүл', salary: 'Орлого', cash: 'Орлого', other: 'Бусад',
-};
-
-const CAT_META = {
-  'Гадуур хооллолт':           { emoji: '🍽️', hex: '#E8703A' },
-  'Хүнсний зүйл':              { emoji: '🛒', hex: '#4F9D69' },
-  'Тээвэр':                    { emoji: '🚗', hex: '#E0A33E' },
-  'Орлого':                    { emoji: '💰', hex: '#2E9E5B' },
-  'Шилжүүлэг & гэр бүл':      { emoji: '💸', hex: '#C2698F' },
-  'Захиалга & сервис':         { emoji: '📱', hex: '#3FA9A0' },
-  'Боловсрол':                  { emoji: '📚', hex: '#5566B5' },
-  'Чөлөөт цаг / зугаа цэнгэл': { emoji: '🎬', hex: '#8B6FB8' },
-  'Хувцас / гоо сайхан':      { emoji: '👕', hex: '#D86A92' },
-  'Эрүүл мэнд':                { emoji: '🏥', hex: '#D85A5A' },
-  'Ахуйн хэрэглээ':            { emoji: '🏠', hex: '#3E7CB1' },
-  'Амралт зугаалга':           { emoji: '✈️', hex: '#56AEBE' },
-  'Бусад':                      { emoji: '📦', hex: '#8A8275' },
-};
-
 export function catLabel(c) {
   if (c == null) return 'Ангилаагүй';
-  return OLD_KEY_TO_NEW[c] || c;
+  return OLD_TO_NEW[c] || c;
 }
 export function catColor(c) {
   if (c == null) return 'bg-orange-100 text-orange-700';
-  const name = OLD_KEY_TO_NEW[c] || c;
+  const name = OLD_TO_NEW[c] || c;
   return CATEGORY_COLORS[name] || 'bg-slate-200 text-slate-700';
 }
 export function catEmoji(c) {
   if (c == null) return '⏳';
-  const name = OLD_KEY_TO_NEW[c] || c;
-  return CAT_META[name]?.emoji || '📦';
+  const name = OLD_TO_NEW[c] || c;
+  return CATEGORY_META[name]?.emoji || '📦';
 }
 export function catHex(c) {
   if (c == null) return '#F0A93C';
-  const name = OLD_KEY_TO_NEW[c] || c;
-  return CAT_META[name]?.hex || '#8A8275';
+  const name = OLD_TO_NEW[c] || c;
+  return CATEGORY_META[name]?.hex || '#8A8275';
 }
 export function hexTint(hex, alpha) {
   const r = parseInt(hex.slice(1, 3), 16);

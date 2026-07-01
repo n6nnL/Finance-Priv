@@ -8,6 +8,7 @@
     "start": "node src/index.js",
     "get-token": "node scripts/get-token.js",
     "repush": "node scripts/repush.js",
+    "migrate-categories": "node scripts/migrate-categories.js",
     "test": "node --test"
   },
   "engines": {
