@@ -43,6 +43,9 @@ export const config = {
   },
   bodyLimit: optional('BODY_LIMIT', '100kb'),
   logLevel: optional('LOG_LEVEL', 'info'),
+  // Ангилаагүй (pending_review) гүйлгээ N хоногоос дээш хугацаанд байвал → авто
+  // 'Бусад' болгоно (хэрэглэгчийн бодлого). 0/сөрөг → унтраалттай. Default 3.
+  pendingAutoClassifyDays: num('PENDING_AUTO_CLASSIFY_DAYS', 3),
   // Dashboard нэвтрэлт (хуучин — seed admin-д ашиглана). Password .env-д.
   dashboard: {
     user: optional('DASHBOARD_USER', 'admin'),

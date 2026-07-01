@@ -17,6 +17,7 @@ import { readFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isoDate } from '../config/txfields.js';
+import { DEFAULT_CATEGORY } from '../config/categories.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -454,6 +455,23 @@ export function createDb(dbPath, opts = {}) {
     return _updateNote.run({ id, user_id: userId, note: note && String(note).trim() ? String(note).trim() : null }).changes;
   }
 
+  // Хуучирсан pending_review → автоматаар DEFAULT_CATEGORY ('Бусад'). Хэрэглэгчийн
+  // бодлого: гүйлгээ N хоногоос дээш хугацаанд ангилагдаагүй хэвээр байвал (санахаа
+  // больсон) авто "Бусад" болгоно. Гараар зассан мөрийг (manually_edited) ХӨНДӨХГҮЙ.
+  // Систем-даяар (owner-ийн бүх гүйлгээ). Буцаах: өөрчлөгдсөн мөрийн тоо.
+  const _autoClassifyStale = db.prepare(`UPDATE transactions
+    SET category = @category, status = 'classified'
+    WHERE status = 'pending_review'
+      AND (manually_edited IS NULL OR manually_edited = 0)
+      AND txn_date IS NOT NULL
+      AND txn_date <= date('now', @cutoff)`);
+
+  function autoClassifyStalePending({ days = 3, category = DEFAULT_CATEGORY } = {}) {
+    const d = Math.trunc(Number(days));
+    if (!Number.isFinite(d) || d <= 0) return 0; // 0/сөрөг → унтраалттай
+    return _autoClassifyStale.run({ category, cutoff: `-${d} days` }).changes;
+  }
+
   // ===================== OVERRIDES (per-user) =====================
   const _addOverride = db.prepare(`
     INSERT INTO category_overrides (user_id, merchant_pattern, category, friendly_name, default_note)
@@ -596,6 +614,7 @@ export function createDb(dbPath, opts = {}) {
     // transactions
     insertTransaction, getByMessageId, getById, listTransactions, getSummary,
     getMonthly, getByCategory, getCycleSpend, getPending, updateCategoryById, updateCategoryByPattern, updateNote,
+    autoClassifyStalePending,
     // real-time tracker: %-хуваарилалт
     getBudgetAllocations, saveBudgetAllocations,
     // overrides

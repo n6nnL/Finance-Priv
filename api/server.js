@@ -50,6 +50,23 @@ const server = app.listen(config.port, () => {
   });
 });
 
+// --- Хуучирсан pending_review → авто 'Бусад' (хэрэглэгчийн бодлого) ---
+// N хоногоос дээш ангилагдаагүй байвал (санахаа больсон) авто ангилна. Эхлэхэд
+// нэг удаа + 12 цаг тутам. 0/сөрөг days → унтраалттай. Гараар зассныг хөндөхгүй.
+function sweepStalePending() {
+  try {
+    const n = db.autoClassifyStalePending({ days: config.pendingAutoClassifyDays });
+    if (n > 0) logger.info('Хуучирсан pending → Бусад (авто)', { count: n, days: config.pendingAutoClassifyDays });
+  } catch (err) {
+    logger.warn('sweepStalePending алдаа', { err: err?.message });
+  }
+}
+if (config.pendingAutoClassifyDays > 0) {
+  sweepStalePending();
+  const timer = setInterval(sweepStalePending, 12 * 60 * 60 * 1000);
+  if (timer.unref) timer.unref();
+}
+
 // Graceful shutdown
 function shutdown(signal) {
   logger.info('Зогсоох дохио — graceful shutdown', { signal });
