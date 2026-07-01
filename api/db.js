@@ -16,6 +16,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { readFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isoDate } from '../config/txfields.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -23,10 +24,9 @@ function normalizeDate(input) {
   if (!input) return null;
   const s = String(input).trim();
   if (!s) return null;
-  const isoMatch = s.match(/^(\d{4}-\d{2}-\d{2})/);
-  if (isoMatch) return isoMatch[1];
-  const dotted = s.match(/^(\d{4})[./](\d{2})[./](\d{2})/);
-  if (dotted) return `${dotted[1]}-${dotted[2]}-${dotted[3]}`;
+  // ISO/dotted мөрийн эхэнд (config/txfields.js — дундын); үгүй бол Date fallback.
+  const iso = isoDate(s, { anchored: true });
+  if (iso) return iso;
   const d = new Date(s);
   if (!Number.isNaN(d.getTime())) return d.toISOString().slice(0, 10);
   return s;

@@ -16,29 +16,12 @@
 import http from 'node:http';
 import { URL } from 'node:url';
 import { OAuth2Client } from 'google-auth-library';
-import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { loadEnv } from '../config/loadEnv.js';
 
-// --- .env-г энгийнээр унших (config.js-тэй ижил, тусдаа давхар хамаарал үүсгэхгүй) ---
-function loadEnv() {
-  const __dirname = dirname(fileURLToPath(import.meta.url));
-  try {
-    const raw = readFileSync(join(__dirname, '..', '.env'), 'utf8');
-    for (const line of raw.split('\n')) {
-      const t = line.trim();
-      if (!t || t.startsWith('#')) continue;
-      const eq = t.indexOf('=');
-      if (eq === -1) continue;
-      const k = t.slice(0, eq).trim();
-      let v = t.slice(eq + 1).trim().replace(/^["']|["']$/g, '');
-      if (process.env[k] === undefined) process.env[k] = v;
-    }
-  } catch {
-    /* .env байхгүй бол shell env ашиглана */
-  }
-}
-loadEnv();
+// .env-г shared loader-ээр унших (root .env).
+loadEnv(join(dirname(fileURLToPath(import.meta.url)), '..', '.env'));
 
 // ⚠️ Нууц утгыг ЗӨВХӨН .env-ээс уншина (кодод хатуу бичихгүй — GitHub-д аюулгүй).
 const CLIENT_ID = process.env.GOOGLE_CLIENT_ID;

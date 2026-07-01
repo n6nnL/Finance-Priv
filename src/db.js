@@ -1,5 +1,5 @@
 // ============================================================
-//  db.js — SQLite (better-sqlite3)
+//  db.js — SQLite (node:sqlite, Node 22.5+/24 — native build хэрэггүй)
 //  Хадгалах зүйлс:
 //    - lastSeenUid + UIDVALIDITY (state хүснэгт)
 //    - боловсруулсан Message-ID (идэмпотентность)

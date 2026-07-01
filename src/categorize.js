@@ -2,12 +2,11 @@
 //  categorize.js — Дүрэмд суурилсан (keyword) ангилагч (listener тал)
 //
 //  Дараалал: Орлого(type==='income') → keyword дүрэм → null.
-//  ⚠️ Танигдаагүй бол 'Бусад' БИШ, `null` буцаана — систем автоматаар
-//  "Бусад" болгохгүй. API тал null үед status='pending_review' болгож,
-//  learned override-г энэ дүрмээс ӨМНӨ шалгана (classify.js).
+//  ⚠️ Танигдаагүй бол 'Бусад' БИШ, `null`. Keyword-логик нь
+//  config/categories.js-д (matchByKeywords) — API тал ч мөн адил дуудна.
 // ============================================================
 
-import { CATEGORY_RULES, INCOME_CATEGORY } from '../config/categories.js';
+import { INCOME_CATEGORY, matchByKeywords } from '../config/categories.js';
 
 /**
  * Гүйлгээний object авч category буцаана (эсвэл null = танигдаагүй).
@@ -15,18 +14,8 @@ import { CATEGORY_RULES, INCOME_CATEGORY } from '../config/categories.js';
  * @returns {string|null}
  */
 export function categorize(tx) {
-  // Орлого бол шууд 'Орлого' (хүмүүсээс ирсэн шилжүүлэг ч энд багтана)
   if (tx?.type === 'income') return INCOME_CATEGORY;
-
-  const haystack = `${tx?.description ?? ''} ${tx?.raw ?? ''}`.toLowerCase();
-  if (!haystack.trim()) return null;
-
-  for (const rule of CATEGORY_RULES) {
-    for (const kw of rule.keywords) {
-      if (haystack.includes(kw.toLowerCase())) return rule.category;
-    }
-  }
-  return null; // танигдаагүй → API талд pending_review
+  return matchByKeywords(`${tx?.description ?? ''} ${tx?.raw ?? ''}`);
 }
 
 export default categorize;

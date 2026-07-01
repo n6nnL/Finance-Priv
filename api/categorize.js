@@ -1,27 +1,20 @@
 // ============================================================
 //  categorize.js — Дүрэмд суурилсан ангилал (API тал)
-//  Listener-ийн config/categories.js-г ДАХИН АШИГЛАНА (нэг эх сурвалж).
+//  Keyword-логик (matchByKeywords) + isPos (detectIsPos) нь дундын эх сурвалжаас
+//  (config/) — давхардал үгүй, listener талтай ЯГ ижил дүрэм.
 // ============================================================
 
-import { CATEGORY_RULES, CATEGORIES, INCOME_CATEGORY, DEFAULT_CATEGORY } from '../config/categories.js';
+import { CATEGORIES, INCOME_CATEGORY, DEFAULT_CATEGORY, matchByKeywords } from '../config/categories.js';
+import { detectIsPos } from '../config/txfields.js';
 
 /**
  * Текстээс keyword-аар ангилал тодорхойлох.
- * ⚠️ Танигдаагүй бол 'other' БИШ, `null` буцаана — систем автоматаар "Бусад"
- * болгохгүй; оронд нь дуудагч тал pending_review болгож AI санал асууна.
- * "Бусад"-ыг зөвхөн хэрэглэгч өөрөө баталгаажуулахдаа сонгож болно.
+ * ⚠️ Танигдаагүй бол 'other'/'Бусад' БИШ, `null` — дуудагч тал pending_review болгоно.
  * @param {string} text  description (+ raw)
- * @returns {string|null} category эсвэл null (танигдаагүй)
+ * @returns {string|null}
  */
 export function categorizeByRules(text) {
-  const hay = String(text || '').toLowerCase();
-  if (!hay.trim()) return null;
-  for (const rule of CATEGORY_RULES) {
-    for (const kw of rule.keywords) {
-      if (hay.includes(kw.toLowerCase())) return rule.category;
-    }
-  }
-  return null;
+  return matchByKeywords(text);
 }
 
 /** Боломжит бүх 10 ангиллын жагсаалт (dropdown болон AI prompt-д) */
@@ -29,14 +22,9 @@ export function listCategories() {
   return [...CATEGORIES];
 }
 
-/**
- * POS (картаар тодорхой газар) гүйлгээ эсэх — description нь BOM-оор төгссөн.
- * (parsers/golomt.js-ийн detectIsPos-той ижил дүрэм; API-д cheerio импортлохгүйн
- *  тулд энд давхарлав.)
- */
+/** POS (картаар тодорхой газар) гүйлгээ эсэх — config/txfields.js-ийн detectIsPos. */
 export function isPosDescription(desc) {
-  if (!desc) return false;
-  return /BOM\b/i.test(desc);
+  return detectIsPos(desc);
 }
 
 export { DEFAULT_CATEGORY, INCOME_CATEGORY };

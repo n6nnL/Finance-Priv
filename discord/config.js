@@ -3,30 +3,14 @@
 //  Нууц утга (DISCORD_BOT_TOKEN) кодод хатуу бичигдэхгүй.
 // ============================================================
 
-import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
+import { loadEnv } from '../config/loadEnv.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-// Root .env-г энгийнээр унших (нэмэлт пакетгүй)
-function loadDotEnv() {
-  try {
-    const raw = readFileSync(join(__dirname, '..', '.env'), 'utf8');
-    for (const line of raw.split('\n')) {
-      const t = line.trim();
-      if (!t || t.startsWith('#')) continue;
-      const eq = t.indexOf('=');
-      if (eq === -1) continue;
-      const k = t.slice(0, eq).trim();
-      let v = t.slice(eq + 1).trim().replace(/^["']|["']$/g, '');
-      if (process.env[k] === undefined) process.env[k] = v;
-    }
-  } catch {
-    /* .env байхгүй бол shell/pm2 env */
-  }
-}
-loadDotEnv();
+// Root .env-г shared loader-ээр унших. Систем/pm2 env давамгайлна.
+loadEnv(join(__dirname, '..', '.env'));
 
 const req = (n) => {
   const v = process.env[n];

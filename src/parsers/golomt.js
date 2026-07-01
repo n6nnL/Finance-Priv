@@ -14,6 +14,7 @@
 // HTML (cheerio) болон plain text хоёуланд ажиллана.
 
 import * as cheerio from 'cheerio';
+import { detectIsPos, isoDate } from '../../config/txfields.js';
 
 /** "14,412.34" / "-14,412.34" / "MNT 37,000.00" → цэвэр тоо (null боломжтой) */
 function parseAmount(str) {
@@ -70,12 +71,9 @@ function labelValue(text, label, opts = {}) {
   return v ? v : null;
 }
 
-/** "2026/01/16" эсвэл "2026-01-16" → "2026-01-16" (ISO). Танихгүй бол null. */
-function normalizeDateStr(s) {
-  if (!s) return null;
-  const m = String(s).match(/(\d{4})[-/.](\d{2})[-/.](\d{2})/);
-  return m ? `${m[1]}-${m[2]}-${m[3]}` : null;
-}
+// Огноо normalize нь config/txfields.js-ийн isoDate (дундын) — parser зан төлөв
+// (текст доторх эхний огноог олно).
+const normalizeDateStr = (s) => isoDate(s);
 
 /** Огноог олох: олон label → дангаар scan (2 формат: YYYY-MM-DD, YYYY/MM/DD) */
 function extractDate(text) {
@@ -122,11 +120,8 @@ function extractDescription(text) {
   );
 }
 
-/** POS (картаар тодорхой газар) гүйлгээ эсэх — description нь BOM-оор төгссөн/агуулсан */
-export function detectIsPos(description) {
-  if (!description) return false;
-  return /BOM\b/i.test(description); // үгийн төгсгөлд BOM → POS дохио
-}
+// detectIsPos нь config/txfields.js-д (дундын эх сурвалж) — эндээс re-export (back-compat).
+export { detectIsPos };
 
 /**
  * Голомт банкны имэйлийг задална.

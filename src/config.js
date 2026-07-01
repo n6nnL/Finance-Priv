@@ -3,41 +3,12 @@
 //  Бүх нууц утга ЗӨВХӨН process.env-ээс уншина (кодод хатуу бичихгүй).
 // ============================================================
 
-import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { loadEnv } from '../config/loadEnv.js';
 
-// .env файлыг гараар уншина (dotenv dependency-гүйгээр энгийн parser).
-// Ингэснээр нэмэлт пакет шаардахгүй; pm2-оор ажиллуулахад env-ийг
-// шууд ecosystem.config-оос эсвэл системээс өгч болно.
-function loadDotEnv() {
-  const __dirname = dirname(fileURLToPath(import.meta.url));
-  const envPath = join(__dirname, '..', '.env');
-  try {
-    const raw = readFileSync(envPath, 'utf8');
-    for (const line of raw.split('\n')) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith('#')) continue;
-      const eq = trimmed.indexOf('=');
-      if (eq === -1) continue;
-      const key = trimmed.slice(0, eq).trim();
-      let val = trimmed.slice(eq + 1).trim();
-      // Хашилт авах
-      if (
-        (val.startsWith('"') && val.endsWith('"')) ||
-        (val.startsWith("'") && val.endsWith("'"))
-      ) {
-        val = val.slice(1, -1);
-      }
-      // Системийн env давамгайлна (pm2 / shell-ээс өгсөн нь түрүүлнэ)
-      if (process.env[key] === undefined) process.env[key] = val;
-    }
-  } catch {
-    // .env байхгүй бол алгасна — env-г өөр газраас өгсөн гэж үзнэ
-  }
-}
-
-loadDotEnv();
+// .env-г shared loader-ээр унших (root .env). Систем/pm2 env давамгайлна.
+loadEnv(join(dirname(fileURLToPath(import.meta.url)), '..', '.env'));
 
 // Заавал байх ёстой хувьсагчдыг шалгана. Дутуу бол шууд унтрана
 // (чимээгүй буруу ажиллахаас сэргийлэх).

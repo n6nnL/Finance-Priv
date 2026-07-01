@@ -2,28 +2,12 @@
 //  config.js — env унших + валидаци (нэмэлт пакетгүй .env parser)
 // ============================================================
 
-import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { loadEnv } from '../config/loadEnv.js';
 
-function loadDotEnv() {
-  const __dirname = dirname(fileURLToPath(import.meta.url));
-  try {
-    const raw = readFileSync(join(__dirname, '.env'), 'utf8');
-    for (const line of raw.split('\n')) {
-      const t = line.trim();
-      if (!t || t.startsWith('#')) continue;
-      const eq = t.indexOf('=');
-      if (eq === -1) continue;
-      const key = t.slice(0, eq).trim();
-      let val = t.slice(eq + 1).trim().replace(/^["']|["']$/g, '');
-      if (process.env[key] === undefined) process.env[key] = val;
-    }
-  } catch {
-    /* .env байхгүй бол shell/pm2 env ашиглана */
-  }
-}
-loadDotEnv();
+// .env-г shared loader-ээр унших (api/.env). Систем/pm2 env давамгайлна.
+loadEnv(join(dirname(fileURLToPath(import.meta.url)), '.env'));
 
 function required(name) {
   const v = process.env[name];

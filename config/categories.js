@@ -103,6 +103,24 @@ export const CATEGORY_RULES = [
   },
 ];
 
+/**
+ * Текстээс keyword дүрмээр ангилал тодорхойлох (танигдаагүй → null).
+ * ★ src/categorize.js БА api/categorize.js хоёул эндээс дуудна — давхардлыг нэгтгэв.
+ * "Орлого"/income-логик нь дуудагч талд (энэ функц зөвхөн keyword харна).
+ * @param {string} text  description (+ raw)
+ * @returns {string|null}
+ */
+export function matchByKeywords(text) {
+  const hay = String(text || '').toLowerCase();
+  if (!hay.trim()) return null;
+  for (const rule of CATEGORY_RULES) {
+    for (const kw of rule.keywords) {
+      if (hay.includes(kw.toLowerCase())) return rule.category;
+    }
+  }
+  return null;
+}
+
 // Хуучин (англи key) ангиллыг шинэ нэр рүү буулгах (нэг удаагийн миграцид).
 // Утга/санааг хадгална — зөвхөн нэрийг шинэ 10-ангиллын схемд тааруулна.
 export const OLD_TO_NEW = {
@@ -117,4 +135,4 @@ export const OLD_TO_NEW = {
   other: 'Бусад',
 };
 
-export default { CATEGORIES, CATEGORY_META, CATEGORY_RULES, INCOME_CATEGORY, DEFAULT_CATEGORY, OLD_TO_NEW };
+export default { CATEGORIES, CATEGORY_META, CATEGORY_RULES, matchByKeywords, INCOME_CATEGORY, DEFAULT_CATEGORY, OLD_TO_NEW };
