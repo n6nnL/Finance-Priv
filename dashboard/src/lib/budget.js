@@ -2,21 +2,11 @@
 //  lib/budget.js — Календарь + Төсвийн цэвэр логик (React-гүй, тестлэгдэх)
 //
 //  Бүх огнооны/циклийн тооцоо ЭНД. Компонентод огнооны логик бичихгүй.
-//  Дараа Google Calendar-аас баяр/event нэмэгдэхэд marker shape нэг хэвээр
-//  үлдэх тул гадны эх сурвалжийг merge хийхэд хялбар.
+//
+//  ⚠️ САНХҮҮГИЙН УТГА ЭНД ХАТУУ БИЧИГДЭХГҮЙ. Цалин/ханш/захиалга/хуваарилалт
+//  бүгд хэрэглэгчийн сервер дэх тохиргооноос (`settings`) дамжина. Доорх функцууд
+//  settings-г параметрээр авна.
 // ============================================================
-
-// USD→MNT ханш — НЭГ газар. Дараа live болгож болно.
-export const USD_MNT = 3578;
-
-// Цалингийн дүн (MNT) — placeholder тогтмол. Дараа бодит орлогоос авч болно.
-export const SALARY_MNT = 3000000;
-
-// Тогтмол сарын захиалгууд (USD-ээр). day = сарын өдөр.
-export const SUBSCRIPTIONS = [
-  { id: 'sub-netflix', title: 'Netflix', day: 7, amountUsd: 3.99 },
-  { id: 'sub-claude', title: 'Claude', day: 25, amountUsd: 20 },
-];
 
 const pad = (n) => String(n).padStart(2, '0');
 
@@ -36,16 +26,20 @@ export function isWeekend(d) {
   return g === 0 || g === 6;
 }
 
-const usdToMnt = (usd) => Math.round(usd * USD_MNT);
+/** USD → MNT (өгөгдсөн ханшаар). */
+export function usdToMnt(usd, rate) {
+  return Math.round((Number(usd) || 0) * (Number(rate) || 0));
+}
 
 /**
- * Цалингийн өдөр: сарын 15. Хэрэв 15 нь амралтын өдөр бол ажлын өдөр хүртэл
- * ухарна (14, 13, …). Энэ хувилбарт зөвхөн амралтын өдрийг шалгана (баяр
- * дараа Google-аас ирнэ). monthIndex 0-based (Date.getMonth()-тэй ижил).
+ * Цалингийн өдөр: тохируулсан `paydayDay` (1–28). Хэрэв тэр өдөр амралтын
+ * (Бямба/Ням) бол ажлын өдөр хүртэл УХАРНА (14, 13, …). guard нь backward
+ * walk-ийг хязгаарлаж infinite loop-аас хамгаална. monthIndex 0-based.
  * @returns {Date}
  */
-export function paydayFor(year, monthIndex) {
-  const d = new Date(year, monthIndex, 15);
+export function paydayFor(year, monthIndex, paydayDay = 15) {
+  const day = Math.min(Math.max(Math.trunc(Number(paydayDay) || 15), 1), 28);
+  const d = new Date(year, monthIndex, day);
   let guard = 0;
   while (isWeekend(d) && guard < 7) {
     d.setDate(d.getDate() - 1);
@@ -59,11 +53,11 @@ export function paydayFor(year, monthIndex) {
  * end нь дараагийн циклд хамаарна (exclusive).
  * @returns {{ start: Date, end: Date }}
  */
-export function getCycle(year, monthIndex) {
-  const start = paydayFor(year, monthIndex);
+export function getCycle(year, monthIndex, paydayDay = 15) {
+  const start = paydayFor(year, monthIndex, paydayDay);
   const ny = monthIndex === 11 ? year + 1 : year;
   const nm = monthIndex === 11 ? 0 : monthIndex + 1;
-  const end = paydayFor(ny, nm);
+  const end = paydayFor(ny, nm, paydayDay);
   return { start, end };
 }
 
@@ -73,60 +67,68 @@ export function isWithinCycle(date, start, end) {
   return t >= start.getTime() && t < end.getTime();
 }
 
-/** Тухайн сарын payday marker (ногоон). */
-export function incomeMarker(year, monthIndex) {
-  const d = paydayFor(year, monthIndex);
+/**
+ * Тухайн сарын payday marker (ногоон). Цалин (amountMnt) нь тохиргооноос;
+ * хараахан оруулаагүй бол null (хуурамч тоо ХАРУУЛАХГҮЙ — зөвхөн огноо).
+ */
+export function incomeMarker(year, monthIndex, settings) {
+  const d = paydayFor(year, monthIndex, settings?.paydayDay);
+  const salary = settings?.salaryAmount;
   return {
     id: `income-${ymd(d)}`, type: 'income', title: 'Цалин',
-    date: ymd(d), amountMnt: SALARY_MNT, recurring: true,
+    date: ymd(d), amountMnt: salary == null ? null : salary, recurring: true,
+  };
+}
+
+/** Захиалгыг (settings.subscriptions) тухайн оны/сарын marker болгох (шар). */
+function subToMarker(sub, year, monthIndex, usdMnt) {
+  const day = Math.min(Math.max(Math.trunc(Number(sub.day) || 1), 1), 28);
+  const d = new Date(year, monthIndex, day);
+  return {
+    id: `sub-${sub.name}-${ymd(d)}`, type: 'subscription', title: sub.name, date: ymd(d),
+    amountUsd: sub.amountUsd, amountMnt: usdToMnt(sub.amountUsd, usdMnt), recurring: true,
   };
 }
 
 /** Тухайн сарын захиалгын marker-ууд (шар). */
-export function subscriptionMarkers(year, monthIndex) {
-  return SUBSCRIPTIONS.map((s) => {
-    const d = new Date(year, monthIndex, s.day);
-    return {
-      id: `${s.id}-${ymd(d)}`, type: 'subscription', title: s.title, date: ymd(d),
-      amountUsd: s.amountUsd, amountMnt: usdToMnt(s.amountUsd), recurring: true,
-    };
-  });
+export function subscriptionMarkers(year, monthIndex, settings) {
+  const subs = settings?.subscriptions || [];
+  return subs.map((s) => subToMarker(s, year, monthIndex, settings?.usdMnt));
 }
 
 /**
  * Циклийн цонхонд (payday→payday) багтах захиалгын тохиолдлууд.
  * Цикл нь 2 хуанлийн сард тэлдэг тул start/end-ийн сарууд дээр scan хийнэ.
  */
-export function cycleSubscriptions({ start, end }) {
+export function cycleSubscriptions({ start, end }, settings) {
+  const subs = settings?.subscriptions || [];
+  const usdMnt = settings?.usdMnt;
   const months = [
     { y: start.getFullYear(), m: start.getMonth() },
     { y: end.getFullYear(), m: end.getMonth() },
   ];
   const out = [];
-  for (const s of SUBSCRIPTIONS) {
+  for (const s of subs) {
     for (const { y, m } of months) {
-      const d = new Date(y, m, s.day);
-      if (isWithinCycle(d, start, end)) {
-        out.push({
-          id: `${s.id}-${ymd(d)}`, type: 'subscription', title: s.title, date: ymd(d),
-          amountUsd: s.amountUsd, amountMnt: usdToMnt(s.amountUsd), recurring: true,
-        });
-      }
+      const mk = subToMarker(s, y, m, usdMnt);
+      if (isWithinCycle(mk.date, start, end)) out.push(mk);
     }
   }
   return out.sort((a, b) => a.date.localeCompare(b.date));
 }
 
 /** Тухайн сарын бүх marker (payday + захиалга + хувийн event). */
-export function monthMarkers(year, monthIndex, personalEvents = []) {
+export function monthMarkers(year, monthIndex, settings, personalEvents = []) {
   const inMonth = (dateStr) => {
     const d = parseYmd(dateStr);
     return d.getFullYear() === year && d.getMonth() === monthIndex;
   };
   return [
-    incomeMarker(year, monthIndex),
-    ...subscriptionMarkers(year, monthIndex),
-    ...personalEvents.filter((e) => inMonth(e.date)),
+    incomeMarker(year, monthIndex, settings),
+    ...subscriptionMarkers(year, monthIndex, settings),
+    ...personalEvents
+      .filter((e) => inMonth(e.date))
+      .map((e) => ({ ...e, type: 'personal', eventId: e.id, id: e.id != null ? `ev-${e.id}` : `ev-${e.date}-${e.title}` })),
   ].sort((a, b) => a.date.localeCompare(b.date));
 }
 

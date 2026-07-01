@@ -1,38 +1,38 @@
-import { useState } from 'react';
-import { login } from '../lib/api.js';
+import { loginWithGoogle } from '../lib/api.js';
 
-export default function Login({ onLogin }) {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [err, setErr] = useState('');
-  const [loading, setLoading] = useState(false);
+// Алдааны кодыг (callback ?error=...) ойлгомжтой мессеж болгох.
+const ERR_MSG = {
+  not_allowed: 'Энэ Google хаягт нэвтрэх зөвшөөрөл олгоогүй байна.',
+  email_unverified: 'Google и-мэйл баталгаажаагүй байна.',
+  bad_state: 'Нэвтрэлтийн сесс хүчингүй болсон. Дахин оролдоно уу.',
+  google_denied: 'Зөвшөөрөл өгөөгүй тул нэвтэрсэнгүй.',
+  google_failed: 'Нэвтрэлт амжилтгүй боллоо. Дахин оролдоно уу.',
+  no_code: 'Нэвтрэлт амжилтгүй боллоо. Дахин оролдоно уу.',
+  user_failed: 'Бүртгэл үүсгэхэд алдаа гарлаа.',
+};
 
-  async function submit(e) {
-    e.preventDefault();
-    setErr('');
-    setLoading(true);
-    try {
-      const user = await login(email.trim(), password);
-      onLogin(user);
-    } catch (e2) {
-      setErr(e2.status === 401 ? 'И-мэйл эсвэл нууц үг буруу' : 'Холбогдож чадсангүй: ' + e2.message);
-    } finally {
-      setLoading(false);
-    }
-  }
+function GoogleIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 48 48" aria-hidden="true" style={{ flexShrink: 0 }}>
+      <path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.4 29.2 35.5 24 35.5c-6.3 0-11.5-5.2-11.5-11.5S17.7 12.5 24 12.5c2.9 0 5.5 1.1 7.5 2.9l5.7-5.7C33.6 6.5 29 4.5 24 4.5 13.2 4.5 4.5 13.2 4.5 24S13.2 43.5 24 43.5 43.5 34.8 43.5 24c0-1.2-.1-2.3-.3-3.5z" />
+      <path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12.5 24 12.5c2.9 0 5.5 1.1 7.5 2.9l5.7-5.7C33.6 6.5 29 4.5 24 4.5 16.3 4.5 9.7 8.9 6.3 14.7z" />
+      <path fill="#4CAF50" d="M24 43.5c5.1 0 9.7-1.9 13.2-5.1l-6.1-5.2c-2 1.5-4.5 2.3-7.1 2.3-5.2 0-9.6-3.1-11.3-7.5l-6.5 5C9.6 39 16.2 43.5 24 43.5z" />
+      <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.1-4.1 5.5l6.1 5.2c-.4.4 6.6-4.8 6.6-14.7 0-1.2-.1-2.3-.3-3.5z" />
+    </svg>
+  );
+}
 
-  const inp = {
-    width: '100%', height: 50, padding: '0 16px',
-    border: '1.5px solid #E3DACB', borderRadius: 13,
-    background: '#FFFDF9', fontFamily: 'Onest', fontSize: 15,
-    color: '#2A2722', outline: 'none', boxSizing: 'border-box',
-  };
+export default function Login() {
+  const errorCode = typeof window !== 'undefined'
+    ? new URLSearchParams(window.location.search).get('error')
+    : null;
+  const err = errorCode ? (ERR_MSG[errorCode] || 'Нэвтрэлт амжилтгүй боллоо.') : '';
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'stretch' }}>
-      {/* Left: form */}
+      {/* Left: sign-in */}
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 32 }}>
-        <form onSubmit={submit} style={{ width: '100%', maxWidth: 400 }}>
+        <div style={{ width: '100%', maxWidth: 400 }}>
           {/* Logo */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 36 }}>
             <div style={{ width: 42, height: 42, borderRadius: 13, background: 'linear-gradient(135deg,#1F7A6B,#2E9E7E)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 6px 16px rgba(31,122,107,.28)' }}>
@@ -42,26 +42,9 @@ export default function Login({ onLogin }) {
           </div>
 
           <h1 style={{ fontFamily: 'Rubik', fontWeight: 600, fontSize: 30, lineHeight: 1.2, letterSpacing: '-.6px', margin: '0 0 8px' }}>Тавтай морил</h1>
-          <p style={{ margin: '0 0 32px', color: '#8C8578', fontSize: 15, lineHeight: 1.5 }}>Санхүүгээ нэг дороос хянаарай. Гүйлгээ автоматаар бүртгэгдэнэ.</p>
-
-          <label style={{ display: 'block', fontSize: 13, fontWeight: 500, color: '#6E665A', marginBottom: 7 }}>И-мэйл</label>
-          <input
-            type="email"
-            value={email}
-            onChange={e => setEmail(e.target.value)}
-            autoComplete="username"
-            style={{ ...inp, marginBottom: 18 }}
-          />
-
-          <label style={{ display: 'block', fontSize: 13, fontWeight: 500, color: '#6E665A', marginBottom: 7 }}>Нууц үг</label>
-          <input
-            type="password"
-            value={password}
-            onChange={e => setPassword(e.target.value)}
-            autoComplete="current-password"
-            autoFocus
-            style={{ ...inp, marginBottom: 26 }}
-          />
+          <p style={{ margin: '0 0 32px', color: '#8C8578', fontSize: 15, lineHeight: 1.5 }}>
+            Google хаягаараа нэвтэрнэ үү. Календарь хэсэгт ашиглахын тулд Google Calendar-ын (унших) зөвшөөрөл хүсэх болно.
+          </p>
 
           {err && (
             <div style={{ background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 10, padding: '10px 14px', color: '#D8483B', fontSize: 14, marginBottom: 20 }}>
@@ -70,19 +53,25 @@ export default function Login({ onLogin }) {
           )}
 
           <button
-            type="submit"
-            disabled={loading || !password || !email}
+            type="button"
+            onClick={loginWithGoogle}
             style={{
-              width: '100%', height: 52, border: 'none', borderRadius: 13,
-              background: loading || !password || !email ? '#C8DDD9' : '#1F7A6B',
-              color: '#fff', fontFamily: 'Onest', fontWeight: 600, fontSize: 16,
-              cursor: loading || !password || !email ? 'not-allowed' : 'pointer',
-              boxShadow: '0 6px 16px rgba(31,122,107,.25)',
+              width: '100%', height: 52, padding: '0 18px',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12,
+              border: '1.5px solid #E3DACB', borderRadius: 13,
+              background: '#FFFFFF', color: '#2A2722',
+              fontFamily: 'Onest', fontWeight: 600, fontSize: 16, cursor: 'pointer',
+              boxShadow: '0 4px 14px rgba(42,39,34,.06)',
             }}
           >
-            {loading ? 'Шалгаж байна...' : 'Нэвтрэх'}
+            <GoogleIcon />
+            <span style={{ whiteSpace: 'nowrap' }}>Google-ээр нэвтрэх</span>
           </button>
-        </form>
+
+          <p style={{ margin: '18px 0 0', color: '#A39A8A', fontSize: 13, lineHeight: 1.5 }}>
+            Зөвхөн зөвшөөрөгдсөн Google хаягууд нэвтэрнэ.
+          </p>
+        </div>
       </div>
 
       {/* Right: illustration — desktop only */}

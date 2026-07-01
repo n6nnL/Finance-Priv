@@ -37,6 +37,41 @@ export function normalizeMerchant(desc) {
   return String(desc || '').toUpperCase().replace(/^\d{3,4}\s+/, '').replace(/\s+/g, ' ').trim();
 }
 
+/**
+ * Хэрэглэгчийн тохиргооны DEFAULT.
+ *
+ *  ⚠️ ЦАЛИН (salaryAmount)-д DEFAULT БАЙХГҮЙ (null) — хэрэглэгч ЗААВАЛ оруулна.
+ *  Код дотор хуурамч цалин/төсвийн дүн ХЭЗЭЭ Ч бичигдэхгүй (public repo). Subscription
+ *  seed (Netflix/Claude) болон ангиллын нэр нь зөвхөн хэрэглэгчийн засаж болох эхлэл;
+ *  бодит дүн нь DB-д, хэрэглэгчийнх.
+ */
+export const DEFAULT_SETTINGS = {
+  salaryAmount: null, // ЗААВАЛ оруулна — default үгүй
+  paydayDay: 15,
+  usdMnt: 3578,
+  subscriptions: [
+    { name: 'Netflix', day: 7, amountUsd: 3.99 },
+    { name: 'Claude', day: 25, amountUsd: 20 },
+  ],
+  categoryAllocations: [
+    { category: 'Хадгаламж', amountMnt: 0 },
+    { category: 'Хүнсний зүйл', amountMnt: 0 },
+    { category: 'Гадуур хооллолт', amountMnt: 0 },
+    { category: 'Тээвэр', amountMnt: 0 },
+  ],
+};
+
+/**
+ * Real-time tracker-ийн %-хуваарилалтын DEFAULT (шинэ хэрэглэгчид seed).
+ * Хувиар удирдана (хэрэглэгчийн шаардлага). Нийлбэр 100% давж БОЛНО.
+ */
+export const DEFAULT_ALLOC_PERCENTS = [
+  { category: 'Хадгаламж', percent: 17 },
+  { category: 'Хүнсний зүйл', percent: 13 },
+  { category: 'Гадуур хооллолт', percent: 8 },
+  { category: 'Тээвэр', percent: 5 },
+];
+
 export function createDb(dbPath, opts = {}) {
   if (dbPath && dbPath !== ':memory:') mkdirSync(dirname(dbPath), { recursive: true });
 
@@ -122,6 +157,44 @@ export function createDb(dbPath, opts = {}) {
         throw e;
       }
     }
+
+    // 006: ТӨСӨВ — хэрэглэгчийн тохиргоо + хувийн event (per-user) -----------
+    // user_settings: нэг хэрэглэгчид нэг мөр, JSON (цалин/payday/ханш/subs/alloc).
+    db.exec(`CREATE TABLE IF NOT EXISTS user_settings (
+      user_id INTEGER PRIMARY KEY,
+      data TEXT NOT NULL DEFAULT '{}',
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')))`);
+    // personal_events: хуанли дээрх хувийн тэмдэглэгээ (нэр/огноо/төсөв).
+    db.exec(`CREATE TABLE IF NOT EXISTS personal_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      title TEXT NOT NULL,
+      date TEXT NOT NULL,
+      amount_mnt INTEGER,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')))`);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_pevents_user ON personal_events (user_id)');
+
+    // 007: GOOGLE нэвтрэлт + Calendar token (хүний нэвтрэлт Google руу шилжсэн) ----
+    // users дээр google_sub/picture багана. password_hash NOT NULL хэвээр — Google
+    // хэрэглэгчид хоосон ('') sentinel-тэй (bcrypt compare ХЭЗЭЭ Ч таарахгүй).
+    if (!hasColumn('users', 'google_sub')) db.exec('ALTER TABLE users ADD COLUMN google_sub TEXT');
+    if (!hasColumn('users', 'picture')) db.exec('ALTER TABLE users ADD COLUMN picture TEXT');
+    // google_tokens: Calendar refresh_token (НУУЦ — API хариуд ХЭЗЭЭ Ч буцаахгүй).
+    db.exec(`CREATE TABLE IF NOT EXISTS google_tokens (
+      user_id INTEGER PRIMARY KEY,
+      refresh_token TEXT,
+      scope TEXT,
+      calendar_connected INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')))`);
+
+    // 008: REAL-TIME TRACKER — %-хуваарилалт (per-user) -----------------------
+    // Хувиар удирдана. Composite PK (user_id, category) → per-user тусгаарлалт.
+    db.exec(`CREATE TABLE IF NOT EXISTS budget_allocations (
+      user_id INTEGER NOT NULL,
+      category TEXT NOT NULL,
+      percent REAL NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (user_id, category))`);
   }
   migrate();
 
@@ -277,6 +350,68 @@ export function createDb(dbPath, opts = {}) {
     return { month: m, byCategory, totalExpense: Number(exp), totalIncome: Number(inc) };
   }
 
+  /**
+   * Циклийн зарлага ангиллаар (real-time tracker). READ-ONLY.
+   *  Хил: [startYmd inclusive, endYmd exclusive) — txn_date нь 'YYYY-MM-DD' тул
+   *  string харьцуулалт зөв (давхцал/алдалтгүй). Зөвхөн ЗАРЛАГА (type='expense').
+   *  Ангилаагүй / pending_review → тусдаа `unclassified` (далдлахгүй; нийлбэр тэнцэнэ).
+   *  Орлогыг (income) тусад нь `actualIncome`-оор буцаана (зарлагад холихгүй).
+   * @returns {{ byCategory:{category,spent}[], unclassified:number, totalSpend:number, actualIncome:number }}
+   */
+  function getCycleSpend(userId, startYmd, endYmd) {
+    const rows = db.prepare(`
+      SELECT CASE WHEN category IS NULL OR status='pending_review' THEN NULL ELSE category END AS cat,
+             COALESCE(SUM(amount),0) AS total
+      FROM transactions
+      WHERE user_id=? AND type='expense' AND txn_date IS NOT NULL
+            AND txn_date >= ? AND txn_date < ?
+      GROUP BY cat`).all(userId, startYmd, endYmd);
+    let unclassified = 0;
+    const byCategory = [];
+    for (const r of rows) {
+      if (r.cat == null) unclassified += Number(r.total);
+      else byCategory.push({ category: r.cat, spent: Number(r.total) });
+    }
+    byCategory.sort((a, b) => b.spent - a.spent);
+    const totalSpend = byCategory.reduce((s, r) => s + r.spent, 0) + unclassified;
+    const actualIncome = Number(db.prepare(`SELECT COALESCE(SUM(amount),0) t FROM transactions
+      WHERE user_id=? AND type='income' AND txn_date IS NOT NULL AND txn_date >= ? AND txn_date < ?`)
+      .get(userId, startYmd, endYmd).t);
+    return { byCategory, unclassified, totalSpend, actualIncome };
+  }
+
+  // ===================== BUDGET ALLOCATIONS (%, per-user) =====================
+  const _allocList = db.prepare('SELECT category, percent FROM budget_allocations WHERE user_id=? ORDER BY rowid');
+  const _allocDelAll = db.prepare('DELETE FROM budget_allocations WHERE user_id=?');
+  const _allocIns = db.prepare("INSERT INTO budget_allocations (user_id, category, percent, updated_at) VALUES (?,?,?,datetime('now'))");
+
+  /** %-хуваарилалт. Мөр байхгүй бол DEFAULT seed буцаана (persist хийхгүй). */
+  function getBudgetAllocations(userId) {
+    const rows = _allocList.all(userId);
+    if (rows.length === 0) return DEFAULT_ALLOC_PERCENTS.map((a) => ({ ...a }));
+    return rows.map((r) => ({ category: r.category, percent: Number(r.percent) }));
+  }
+
+  /** Бүх жагсаалтыг ATOMIC upsert (replace-all). Хэсэгчилсэн бичилт үлдээхгүй. */
+  function saveBudgetAllocations(userId, list) {
+    db.exec('BEGIN');
+    try {
+      _allocDelAll.run(userId);
+      const seen = new Set();
+      for (const a of list || []) {
+        const cat = String(a?.category ?? '').trim();
+        if (!cat || seen.has(cat)) continue; // давхар категори алгасна (PK мөргөлдөөн)
+        seen.add(cat);
+        _allocIns.run(userId, cat, Math.max(0, Number(a.percent) || 0));
+      }
+      db.exec('COMMIT');
+    } catch (e) {
+      db.exec('ROLLBACK');
+      throw e;
+    }
+    return getBudgetAllocations(userId);
+  }
+
   function getPending(userId, { limit = 100, offset = 0 } = {}) {
     const lim = Math.min(Math.max(Number(limit) || 100, 1), 500);
     const off = Math.max(Number(offset) || 0, 0);
@@ -350,6 +485,109 @@ export function createDb(dbPath, opts = {}) {
     });
   }
 
+  // ===================== SETTINGS (per-user, JSON) =====================
+  const _getSettings = db.prepare('SELECT data FROM user_settings WHERE user_id = ?');
+  const _saveSettings = db.prepare(`INSERT INTO user_settings (user_id, data, updated_at)
+    VALUES (?, ?, datetime('now'))
+    ON CONFLICT(user_id) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at`);
+
+  /** Хэрэглэгчийн тохиргоо — хадгалаагүй бол DEFAULT (цалин = null). */
+  function getSettings(userId) {
+    const row = _getSettings.get(userId);
+    let saved = {};
+    if (row) { try { saved = JSON.parse(row.data) || {}; } catch { saved = {}; } }
+    // DEFAULT дээр хадгалсныг давхарлана (дутуу талбар → default утга).
+    return { ...structuredClone(DEFAULT_SETTINGS), ...saved };
+  }
+
+  /** Upsert (route дотор zod-оор баталгаажуулсан obj). */
+  function saveSettings(userId, obj) {
+    const merged = { ...structuredClone(DEFAULT_SETTINGS), ...(obj || {}) };
+    _saveSettings.run(userId, JSON.stringify(merged));
+    return getSettings(userId);
+  }
+
+  // ===================== PERSONAL EVENTS (per-user) =====================
+  const _listEvents = db.prepare(
+    'SELECT id, title, date, amount_mnt FROM personal_events WHERE user_id = ? ORDER BY date ASC, id ASC'
+  );
+  const _addEvent = db.prepare(
+    'INSERT INTO personal_events (user_id, title, date, amount_mnt) VALUES (?,?,?,?)'
+  );
+  const _getEvent = db.prepare('SELECT id, title, date, amount_mnt FROM personal_events WHERE id = ? AND user_id = ?');
+  const _deleteEvent = db.prepare('DELETE FROM personal_events WHERE id = ? AND user_id = ?');
+
+  const _mapEvent = (r) => (r ? { id: Number(r.id), title: r.title, date: r.date,
+    amountMnt: r.amount_mnt == null ? null : Number(r.amount_mnt) } : null);
+
+  function listEvents(userId) {
+    return _listEvents.all(userId).map(_mapEvent);
+  }
+  function addEvent(userId, e) {
+    const amt = e.amountMnt == null || e.amountMnt === '' ? null : Math.round(Number(e.amountMnt));
+    const res = _addEvent.run(userId, String(e.title).trim(), String(e.date), amt);
+    return _mapEvent(_getEvent.get(Number(res.lastInsertRowid), userId));
+  }
+  function deleteEvent(userId, id) {
+    return _deleteEvent.run(id, userId).changes;
+  }
+
+  // ===================== GOOGLE AUTH (per-user) =====================
+  const _insertGoogleUser = db.prepare(
+    "INSERT INTO users (email, password_hash, role, google_sub, picture) VALUES (?, '', 'user', ?, ?)"
+  );
+  const _linkGoogle = db.prepare('UPDATE users SET google_sub = ?, picture = COALESCE(?, picture) WHERE id = ?');
+
+  function getUserByGoogleSub(sub) {
+    if (!sub) return null;
+    return db.prepare('SELECT * FROM users WHERE google_sub = ?').get(String(sub)) ?? null;
+  }
+
+  /**
+   * Google нэвтрэлт → хэрэглэгч олох/холбох/үүсгэх.
+   *  1) google_sub-аар  2) email-аар (хуучин хэрэглэгч холбоно)  3) шинээр үүсгэх.
+   * password_hash = '' sentinel (local нэвтрэлт хийх боломжгүй).
+   */
+  function upsertGoogleUser({ email, sub, picture = null } = {}) {
+    const e = String(email || '').toLowerCase().trim();
+    const s = String(sub || '');
+    if (!e || !s) return null;
+    let user = getUserByGoogleSub(s);
+    if (user) {
+      if (picture && picture !== user.picture) _linkGoogle.run(s, picture, user.id);
+      return getUserById(user.id);
+    }
+    user = getUserByEmail(e);
+    if (user) {
+      _linkGoogle.run(s, picture, user.id);
+      return getUserById(user.id);
+    }
+    const res = _insertGoogleUser.run(e, s, picture);
+    return getUserById(Number(res.lastInsertRowid));
+  }
+
+  const _saveGoogleTokens = db.prepare(`INSERT INTO google_tokens (user_id, refresh_token, scope, calendar_connected, updated_at)
+    VALUES (@user_id, @refresh_token, @scope, @calendar_connected, datetime('now'))
+    ON CONFLICT(user_id) DO UPDATE SET
+      refresh_token = COALESCE(excluded.refresh_token, google_tokens.refresh_token),
+      scope = excluded.scope,
+      calendar_connected = excluded.calendar_connected,
+      updated_at = excluded.updated_at`);
+
+  /** Calendar token хадгалах. refresh_token null бол хуучныг хэвээр (Google зөвхөн
+   *  анхны consent дээр refresh_token буцаадаг). НУУЦ — API хариуд буцаахгүй. */
+  function saveGoogleTokens(userId, { refreshToken = null, scope = '' } = {}) {
+    const calendar = String(scope || '').includes('calendar') ? 1 : 0;
+    _saveGoogleTokens.run({
+      user_id: userId, refresh_token: refreshToken || null,
+      scope: String(scope || ''), calendar_connected: calendar,
+    });
+    return getGoogleTokens(userId);
+  }
+  function getGoogleTokens(userId) {
+    return db.prepare('SELECT user_id, refresh_token, scope, calendar_connected, updated_at FROM google_tokens WHERE user_id = ?').get(userId) ?? null;
+  }
+
   function close() { try { db.close(); } catch { /* ignore */ } }
 
   return {
@@ -357,9 +595,15 @@ export function createDb(dbPath, opts = {}) {
     createUser, getUserByEmail, getUserById, countUsers, getOwnerUserId,
     // transactions
     insertTransaction, getByMessageId, getById, listTransactions, getSummary,
-    getMonthly, getByCategory, getPending, updateCategoryById, updateCategoryByPattern, updateNote,
+    getMonthly, getByCategory, getCycleSpend, getPending, updateCategoryById, updateCategoryByPattern, updateNote,
+    // real-time tracker: %-хуваарилалт
+    getBudgetAllocations, saveBudgetAllocations,
     // overrides
     addOverride, getOverrides, normalizeMerchant,
+    // settings + personal events (төсөв)
+    getSettings, saveSettings, listEvents, addEvent, deleteEvent,
+    // google auth
+    getUserByGoogleSub, upsertGoogleUser, saveGoogleTokens, getGoogleTokens,
     migrate, close, _raw: db,
   };
 }

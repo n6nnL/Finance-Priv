@@ -81,6 +81,28 @@ function qs(params = {}) {
 }
 
 // ---- Auth ----
+/** Google нэвтрэлт рүү шилжих (сервер consent руу redirect хийнэ). */
+export function loginWithGoogle() {
+  window.location.assign('/api/auth/google');
+}
+
+/**
+ * OAuth callback: browser-ийн URL fragment (#access=...&refresh=...)-аас JWT
+ * задлаж localStorage-д хадгална. Дараа нь fragment-г цэвэрлэнэ (token түүхэнд
+ * үлдээхгүй). Токен олдвол true.
+ */
+export function consumeAuthFragment() {
+  const hash = typeof window !== 'undefined' ? window.location.hash || '' : '';
+  if (!hash.includes('access=')) return false;
+  const params = new URLSearchParams(hash.slice(1));
+  const access = params.get('access');
+  const refresh = params.get('refresh');
+  if (!access) return false;
+  setTokens(access, refresh);
+  history.replaceState(null, '', window.location.pathname + window.location.search);
+  return true;
+}
+
 export async function login(email, password) {
   const res = await fetch('/api/auth/login', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -114,6 +136,16 @@ export const api = {
   patchCategory: (id, { category, applyToAll, merchantPlace, note }) =>
     req(`/api/transactions/${id}/category`, { method: 'PATCH', body: { category, applyToAll, merchantPlace: merchantPlace || undefined, note: note || undefined } }),
   updateNote: (id, note) => req(`/api/transactions/${id}/note`, { method: 'PATCH', body: { note } }),
+  // ---- Төсөв: тохиргоо + хувийн event ----
+  getSettings: () => req('/api/settings'),
+  saveSettings: (settings) => req('/api/settings', { method: 'PUT', body: settings }),
+  events: () => req('/api/events'),
+  addEvent: (e) => req('/api/events', { method: 'POST', body: e }),
+  deleteEvent: (id) => req(`/api/events/${id}`, { method: 'DELETE' }),
+  // ---- Real-time tracker ----
+  budgetStatus: () => req('/api/budget-status?cycle=current'),
+  budgetAllocations: () => req('/api/budget-allocations'),
+  saveBudgetAllocations: (allocations) => req('/api/budget-allocations', { method: 'PUT', body: { allocations } }),
 };
 
 export default api;

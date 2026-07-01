@@ -30,6 +30,14 @@ const app = createApp({
   jwtAccessTtl: config.jwt.accessTtl,
   jwtRefreshTtl: config.jwt.refreshTtl,
   allowRegister: config.auth.allowRegister,
+  localAuth: config.auth.localAuth,
+  google: {
+    clientId: config.google.clientId,
+    clientSecret: config.google.clientSecret,
+    redirectUri: config.google.redirectUri,
+    allowedEmails: config.google.allowedEmails,
+    dashboardBaseUrl: config.google.dashboardBaseUrl,
+  },
 });
 
 const server = app.listen(config.port, () => {

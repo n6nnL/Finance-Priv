@@ -24,7 +24,7 @@ const mockAi = {
 before(async () => {
   db = createDb(':memory:');
   OWNER = db.createUser('admin', hashPasswordSync('testpw'), 'admin').id; // owner (machine хамаарна)
-  const app = createApp({ db, ai: mockAi, apiKey: API_KEY, jwtSecret: JWT_SECRET, allowRegister: true, rateLimit: { windowSeconds: 60, max: 100000 } });
+  const app = createApp({ db, ai: mockAi, apiKey: API_KEY, jwtSecret: JWT_SECRET, allowRegister: true, localAuth: true, rateLimit: { windowSeconds: 60, max: 100000 } });
   await new Promise((r) => { server = app.listen(0, () => { baseUrl = `http://127.0.0.1:${server.address().port}`; r(); }); });
 });
 after(async () => { await new Promise((r) => server.close(r)); db.close(); });
@@ -165,7 +165,7 @@ test('multi-tenant: хэрэглэгч зөвхөн өөрийн өгөгдли�
 test('register хаалттай үед → 403', async () => {
   const d = createDb(':memory:');
   d.createUser('o', hashPasswordSync('x'), 'admin');
-  const app = createApp({ db: d, ai: mockAi, apiKey: API_KEY, jwtSecret: JWT_SECRET, allowRegister: false, rateLimit: { windowSeconds: 60, max: 100000 } });
+  const app = createApp({ db: d, ai: mockAi, apiKey: API_KEY, jwtSecret: JWT_SECRET, allowRegister: false, localAuth: true, rateLimit: { windowSeconds: 60, max: 100000 } });
   const srv = await new Promise((r) => { const s = app.listen(0, () => r(s)); });
   const url = `http://127.0.0.1:${srv.address().port}`;
   const r = await fetch(`${url}/api/auth/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: 'x@y.z', password: 'pass1234' }) });

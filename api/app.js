@@ -12,9 +12,11 @@ import { createAuth } from './middleware/auth.js';
 import { createRateLimit } from './middleware/rateLimit.js';
 import { createTransactionsRouter } from './routes/transactions.js';
 import { createMetaRouter } from './routes/meta.js';
+import { createBudgetRouter } from './routes/budget.js';
 import { createAuthRouter, createMeHandler } from './routes/auth.js';
 import { createJwt } from './auth/jwt.js';
 import { createLocalProvider } from './auth/providers/local.js';
+import { createGoogleProvider } from './auth/providers/google.js';
 import { logger } from './logger.js';
 import { record5xx } from './ops-notify.js';
 
@@ -42,6 +44,8 @@ export function createApp(deps) {
     jwtAccessTtl = '30m',
     jwtRefreshTtl = '30d',
     allowRegister = false,
+    localAuth = false,
+    google = {},
   } = deps;
 
   const app = express();
@@ -66,17 +70,28 @@ export function createApp(deps) {
   const rateLimitMw = createRateLimit(rateLimit);
   const jwt = createJwt({ secret: jwtSecret || apiKey, accessTtl: jwtAccessTtl, refreshTtl: jwtRefreshTtl });
   const provider = createLocalProvider({ db });
+  const googleProvider = google.provider || createGoogleProvider({
+    clientId: google.clientId || '',
+    clientSecret: google.clientSecret || '',
+    redirectUri: google.redirectUri || '',
+  });
   const ownerUserId = db.getOwnerUserId(); // machine (API key) дуудлага хамаарах хэрэглэгч
   const authMw = createAuth({ apiKey, hmacSecret, jwt, ownerUserId });
 
-  // PUBLIC auth (register/login/refresh) — auth ШААРДАХГҮЙ, rate limit-тэй
-  app.use('/api/auth', rateLimitMw, createAuthRouter({ db, jwt, provider, allowRegister }));
+  // PUBLIC auth (google/login/register/refresh) — auth ШААРДАХГҮЙ, rate limit-тэй
+  app.use('/api/auth', rateLimitMw, createAuthRouter({
+    db, jwt, provider, allowRegister, localAuth,
+    googleProvider,
+    allowedEmails: google.allowedEmails || new Set(),
+    dashboardBaseUrl: google.dashboardBaseUrl || '',
+  }));
   // /api/auth/me — authed
   app.get('/api/auth/me', rateLimitMw, authMw, createMeHandler({ db }));
 
   // Бусад бүх /api — auth-аар хамгаалагдсан (JWT эсвэл machine API key)
   app.use('/api/transactions', rateLimitMw, authMw, createTransactionsRouter({ db, ai }));
   app.use('/api', rateLimitMw, authMw, createMetaRouter({ db, ai }));
+  app.use('/api', rateLimitMw, authMw, createBudgetRouter({ db }));
 
   // --- Production: баригдсан dashboard-г serve хийх (нэг origin → CORS хэрэггүй) ---
   const distDir = join(__dirname, '..', 'dashboard', 'dist');

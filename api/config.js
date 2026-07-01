@@ -78,6 +78,25 @@ export const config = {
     seedPassword: optional('SEED_ADMIN_PASSWORD', '') || optional('DASHBOARD_PASSWORD', ''),
     // Олон нийтэд нээлттэй бүртгэл (default OFF — одоо хувийн систем)
     allowRegister: bool('AUTH_ALLOW_REGISTER', false),
+    // Email/нууц үг нэвтрэлт (UI-аас хассан; зөвхөн тест/яаралтай). Prod default OFF.
+    // OFF үед /api/auth/login, /register → 404. Google нь хүний цорын ганц нэвтрэлт.
+    localAuth: bool('AUTH_LOCAL_ENABLED', false),
+  },
+  // Google OAuth (хүний нэвтрэлт) — нэвтрэх + Calendar (readonly) зөвшөөрөл.
+  // Нууц утга api/.env-д (root .env-ийнхээс ТУСДАА — config нь api/.env уншина).
+  google: {
+    clientId: optional('GOOGLE_CLIENT_ID', ''),
+    clientSecret: optional('GOOGLE_CLIENT_SECRET', ''),
+    redirectUri: optional('GOOGLE_OAUTH_REDIRECT_URI', 'http://localhost:3000/api/auth/google/callback'),
+    // Зөвшөөрөгдсөн Google email-үүд (таслалаар). Зөвхөн эдгээр нэвтэрнэ.
+    allowedEmails: new Set(
+      optional('GOOGLE_ALLOWED_EMAILS', '')
+        .split(',')
+        .map((s) => s.trim().toLowerCase())
+        .filter(Boolean)
+    ),
+    // Нэвтэрсний дараа browser-г буцаах SPA суурь (dev: http://localhost:5173).
+    dashboardBaseUrl: optional('DASHBOARD_BASE_URL', ''),
   },
   ai: {
     // AI ангилал СОНГОЛТТОЙ. Идэвхтэй болохын тулд toggle=true БА key байх ёстой.

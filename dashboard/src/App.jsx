@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { api, isAuthed, clearTokens } from './lib/api.js';
+import { api, isAuthed, clearTokens, consumeAuthFragment } from './lib/api.js';
 import Login from './components/Login.jsx';
 import Filters from './components/Filters.jsx';
 import Summary from './components/Summary.jsx';
@@ -35,7 +35,8 @@ function currentMonthLabel() {
 }
 
 export default function App() {
-  const [authed, setAuthed] = useState(isAuthed());
+  // Google callback-аас буцаж ирвэл fragment-аас токен задлаад authed болгоно.
+  const [authed, setAuthed] = useState(() => { consumeAuthFragment(); return isAuthed(); });
   const [user, setUser] = useState(null);
   const [section, setSection] = useState('txn');
 
@@ -99,7 +100,7 @@ export default function App() {
     loadTransactions();
   }
 
-  if (!authed) return <Login onLogin={u => { setUser(u); setAuthed(true); }} />;
+  if (!authed) return <Login />;
 
   const userEmail = user?.email || '';
   const userInitial = userEmail[0]?.toUpperCase() || '?';
