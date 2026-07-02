@@ -13,10 +13,11 @@ import { createRateLimit } from './middleware/rateLimit.js';
 import { createTransactionsRouter } from './routes/transactions.js';
 import { createMetaRouter } from './routes/meta.js';
 import { createBudgetRouter } from './routes/budget.js';
-import { createAuthRouter, createMeHandler } from './routes/auth.js';
+import { createTelegramRouter } from './routes/telegram.js';
+import { createAuthRouter, createMeHandler, createCalendarConnectHandlers, createGmailConnectHandlers } from './routes/auth.js';
 import { createJwt } from './auth/jwt.js';
 import { createLocalProvider } from './auth/providers/local.js';
-import { createGoogleProvider } from './auth/providers/google.js';
+import { createGoogleProvider, LOGIN_SCOPES, CALENDAR_SCOPES, GMAIL_SCOPES } from './auth/providers/google.js';
 import { logger } from './logger.js';
 import { record5xx } from './ops-notify.js';
 
@@ -70,28 +71,57 @@ export function createApp(deps) {
   const rateLimitMw = createRateLimit(rateLimit);
   const jwt = createJwt({ secret: jwtSecret || apiKey, accessTtl: jwtAccessTtl, refreshTtl: jwtRefreshTtl });
   const provider = createLocalProvider({ db });
-  const googleProvider = google.provider || createGoogleProvider({
-    clientId: google.clientId || '',
-    clientSecret: google.clientSecret || '',
-    redirectUri: google.redirectUri || '',
+  const loginClientId = google.login?.clientId || '';
+  const loginClientSecret = google.login?.clientSecret || '';
+  const loginGoogleProvider = google.loginProvider || createGoogleProvider({
+    clientId: loginClientId,
+    clientSecret: loginClientSecret,
+    redirectUri: google.login?.redirectUri || '',
+    scopes: LOGIN_SCOPES,
+    offline: false,
+  });
+  const calendarGoogleProvider = google.calendarProvider || createGoogleProvider({
+    clientId: loginClientId,
+    clientSecret: loginClientSecret,
+    redirectUri: google.calendarRedirectUri || '',
+    scopes: CALENDAR_SCOPES,
+    offline: true,
+  });
+  // Gmail холболт — listener-ийн Gmail client (login client-ээс ТУСДАА)
+  const gmailGoogleProvider = google.gmailProvider || createGoogleProvider({
+    clientId: google.gmail?.clientId || '',
+    clientSecret: google.gmail?.clientSecret || '',
+    redirectUri: google.gmailRedirectUri || '',
+    scopes: GMAIL_SCOPES,
+    offline: true,
   });
   const ownerUserId = db.getOwnerUserId(); // machine (API key) дуудлага хамаарах хэрэглэгч
   const authMw = createAuth({ apiKey, hmacSecret, jwt, ownerUserId });
 
-  // PUBLIC auth (google/login/register/refresh) — auth ШААРДАХГҮЙ, rate limit-тэй
+  // PUBLIC auth (google/login/register/refresh/calendar-callback) — auth ШААРДАХГҮЙ, rate limit-тэй
   app.use('/api/auth', rateLimitMw, createAuthRouter({
     db, jwt, provider, allowRegister, localAuth,
-    googleProvider,
+    loginGoogleProvider, calendarGoogleProvider, gmailGoogleProvider,
+    openSignup: google.openSignup || false,
     allowedEmails: google.allowedEmails || new Set(),
     dashboardBaseUrl: google.dashboardBaseUrl || '',
   }));
   // /api/auth/me — authed
   app.get('/api/auth/me', rateLimitMw, authMw, createMeHandler({ db }));
+  // Calendar холбох/салгах — authed (JWT шаардана)
+  const calendarHandlers = createCalendarConnectHandlers({ db, jwt, calendarGoogleProvider });
+  app.get('/api/auth/google/calendar', rateLimitMw, authMw, calendarHandlers.start);
+  app.post('/api/auth/google/calendar/disconnect', rateLimitMw, authMw, calendarHandlers.disconnect);
+  // Gmail холбох/салгах — authed (JWT шаардана)
+  const gmailHandlers = createGmailConnectHandlers({ db, jwt, gmailGoogleProvider });
+  app.get('/api/auth/gmail/connect', rateLimitMw, authMw, gmailHandlers.start);
+  app.post('/api/auth/gmail/disconnect', rateLimitMw, authMw, gmailHandlers.disconnect);
 
   // Бусад бүх /api — auth-аар хамгаалагдсан (JWT эсвэл machine API key)
   app.use('/api/transactions', rateLimitMw, authMw, createTransactionsRouter({ db, ai }));
   app.use('/api', rateLimitMw, authMw, createMetaRouter({ db, ai }));
   app.use('/api', rateLimitMw, authMw, createBudgetRouter({ db }));
+  app.use('/api/telegram', rateLimitMw, authMw, createTelegramRouter({ db }));
 
   // --- Production: баригдсан dashboard-г serve хийх (нэг origin → CORS хэрэггүй) ---
   const distDir = join(__dirname, '..', 'dashboard', 'dist');

@@ -35,6 +35,9 @@ function bool(name, fallback) {
 export const config = {
   port: num('PORT', 3000),
   apiKey: required('LISTENER_API_KEY'),
+  // OAuth refresh token-ы encryption-at-rest түлхүүр (32 byte hex, root .env-тэй ИЖИЛ).
+  // ЗААВАЛ — token DB-д ил хадгалагдахгүй.
+  tokenEncKey: required('TOKEN_ENC_KEY'),
   hmacSecret: optional('LISTENER_HMAC_SECRET', ''),
   dbPath: optional('DB_PATH', './data/transactions.sqlite'),
   rateLimit: {
@@ -65,17 +68,43 @@ export const config = {
     seedPassword: optional('SEED_ADMIN_PASSWORD', '') || optional('DASHBOARD_PASSWORD', ''),
     // Олон нийтэд нээлттэй бүртгэл (default OFF — одоо хувийн систем)
     allowRegister: bool('AUTH_ALLOW_REGISTER', false),
+    // Google allow-list-ийг алгасаж ямар ч Google хэрэглэгч бүртгүүлэх боломж (default OFF).
+    // Per-user isolation (user_id) хамгаалалттай тул шинэ хэрэглэгч зөвхөн өөрийн (хоосон)
+    // өгөгдлийг харна — owner-ийн гүйлгээнд хүрэхгүй.
+    openSignup: bool('AUTH_OPEN_SIGNUP', false),
     // Email/нууц үг нэвтрэлт (UI-аас хассан; зөвхөн тест/яаралтай). Prod default OFF.
     // OFF үед /api/auth/login, /register → 404. Google нь хүний цорын ганц нэвтрэлт.
     localAuth: bool('AUTH_LOCAL_ENABLED', false),
   },
-  // Google OAuth (хүний нэвтрэлт) — нэвтрэх + Calendar (readonly) зөвшөөрөл.
-  // Нууц утга api/.env-д (root .env-ийнхээс ТУСДАА — config нь api/.env уншина).
+  // Google OAuth (хүний нэвтрэлт) — Login БА Calendar-холболт нь ТУСДАА OAuth client
+  // ашиглана (listener-ийн Gmail client-тэй хуваалцахгүй → "баталгаажаагүй апп"
+  // анхааруулга гарахгүй). Нууц утга api/.env-д.
   google: {
-    clientId: optional('GOOGLE_CLIENT_ID', ''),
-    clientSecret: optional('GOOGLE_CLIENT_SECRET', ''),
-    redirectUri: optional('GOOGLE_OAUTH_REDIRECT_URI', 'http://localhost:3000/api/auth/google/callback'),
-    // Зөвшөөрөгдсөн Google email-үүд (таслалаар). Зөвхөн эдгээр нэвтэрнэ.
+    // Login client — зөвхөн openid/email/profile (минимал scope). Calendar-холболт мөн
+    // ЭНЭ client-ийг ашиглана (тусдаа redirect URI-аар), 3 дахь client шаардлагагүй.
+    login: {
+      clientId: optional('LOGIN_GOOGLE_CLIENT_ID', ''),
+      clientSecret: optional('LOGIN_GOOGLE_CLIENT_SECRET', ''),
+      redirectUri: optional('LOGIN_OAUTH_REDIRECT_URI', 'http://localhost:3000/api/auth/google/callback'),
+    },
+    // Calendar callback redirect URI — login redirectUri-аас deterministically тооцно
+    // (шинэ env хувьсагч шаардахгүй). Google Console дээр хоёуланг нь бүртгэнэ.
+    get calendarRedirectUri() {
+      const login = optional('LOGIN_OAUTH_REDIRECT_URI', 'http://localhost:3000/api/auth/google/callback');
+      return login.replace(/\/google\/callback$/, '/google/calendar/callback');
+    },
+    // Gmail холболт (multi-tenant listener) — listener-ийн Gmail client-ийг ашиглана
+    // (root .env-ийн GOOGLE_CLIENT_ID/SECRET-тэй ИЖИЛ утга энд давхар орно; тухайн
+    // client дээр /api/auth/gmail/callback redirect URI-г Console-д бүртгэнэ).
+    gmail: {
+      clientId: optional('GMAIL_GOOGLE_CLIENT_ID', ''),
+      clientSecret: optional('GMAIL_GOOGLE_CLIENT_SECRET', ''),
+    },
+    get gmailRedirectUri() {
+      const login = optional('LOGIN_OAUTH_REDIRECT_URI', 'http://localhost:3000/api/auth/google/callback');
+      return login.replace(/\/google\/callback$/, '/gmail/callback');
+    },
+    // Зөвшөөрөгдсөн Google email-үүд (таслалаар). AUTH_OPEN_SIGNUP=true үед алгасагдана.
     allowedEmails: new Set(
       optional('GOOGLE_ALLOWED_EMAILS', '')
         .split(',')

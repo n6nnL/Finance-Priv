@@ -4,20 +4,36 @@
 //  local.js-ийн pluggable provider загвартай ижил санаа, гэхдээ OAuth нь
 //  redirect урсгал тул { getAuthUrl, exchangeCode } интерфэйстэй.
 //
-//  Scope: нэвтрэлт (openid/email/profile) + Calendar УНШИХ (readonly).
+//  Хоёр тусдаа хэрэглээ (тус бүрдээ өөр scope/offline тохиргоотой provider
+//  instance үүсгэнэ, routes/auth.js): нэвтрэлт (минимал, offline=false) ба
+//  Calendar холбох (readonly, offline=true → refresh_token).
 //  google-auth-library-ийн OAuth2Client (scripts/get-token.js-тэй ижил загвар).
 // ============================================================
 
 import { OAuth2Client } from 'google-auth-library';
 
-const SCOPES = [
+/** Нэвтрэлт (Sign in with Google) — зөвхөн identity, "баталгаажаагүй апп" анхааруулга гаргахгүй. */
+export const LOGIN_SCOPES = [
   'openid',
   'https://www.googleapis.com/auth/userinfo.email',
   'https://www.googleapis.com/auth/userinfo.profile',
+];
+
+/** Календарь холбох (Settings-ээс opt-in, sensitive scope). */
+export const CALENDAR_SCOPES = [
+  'openid',
   'https://www.googleapis.com/auth/calendar.readonly',
 ];
 
-export function createGoogleProvider({ clientId, clientSecret, redirectUri }) {
+/** Gmail холбох (Settings-ээс opt-in, restricted scope — listener IMAP-д).
+ *  openid заавал — exchangeCode id_token-оор баталгаажуулдаг (email-ийг мэдэх). */
+export const GMAIL_SCOPES = [
+  'openid',
+  'https://www.googleapis.com/auth/userinfo.email',
+  'https://mail.google.com/',
+];
+
+export function createGoogleProvider({ clientId, clientSecret, redirectUri, scopes = LOGIN_SCOPES, offline = false }) {
   const client = new OAuth2Client(clientId, clientSecret, redirectUri);
 
   return {
@@ -29,9 +45,8 @@ export function createGoogleProvider({ clientId, clientSecret, redirectUri }) {
     /** Consent URL — state нь CSRF-д (signed JWT). offline+consent → refresh_token. */
     getAuthUrl(state) {
       return client.generateAuthUrl({
-        access_type: 'offline',
-        prompt: 'consent', // refresh_token-г найдвартай авах
-        scope: SCOPES,
+        ...(offline ? { access_type: 'offline', prompt: 'consent' } : {}),
+        scope: scopes,
         include_granted_scopes: true,
         state,
       });

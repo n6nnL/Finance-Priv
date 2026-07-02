@@ -53,6 +53,14 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_tx_status ON transactions(status);
 `);
 
+// Multi-tenant: гүйлгээ аль хэрэглэгчийн inbox-оос ирснийг тэмдэглэнэ (идемпотент ALTER)
+{
+  const cols = db.prepare('PRAGMA table_info(transactions)').all();
+  if (!cols.some((c) => c.name === 'user_id')) {
+    db.exec('ALTER TABLE transactions ADD COLUMN user_id INTEGER');
+  }
+}
+
 const now = () => new Date().toISOString();
 
 // ------------------------------------------------------------
@@ -73,37 +81,57 @@ export function setState(key, value) {
   _setState.run(key, String(value));
 }
 
-export function getLastSeenUid() {
-  const v = getState('lastSeenUid');
+// Multi-tenant: state key-ууд хэрэглэгч бүрээр scoped (`lastSeenUid:<userId>`).
+// Хуучин global key-г owner руу нэг удаа шилжүүлэх нь migrateLegacyStateToUser()-д.
+
+export function getLastSeenUid(userId) {
+  const v = getState(`lastSeenUid:${userId}`);
   return v ? Number(v) : 0;
 }
 
-export function setLastSeenUid(uid) {
-  setState('lastSeenUid', uid);
+export function setLastSeenUid(userId, uid) {
+  setState(`lastSeenUid:${userId}`, uid);
 }
 
-export function getUidValidity() {
-  const v = getState('uidValidity');
+export function getUidValidity(userId) {
+  const v = getState(`uidValidity:${userId}`);
   return v ? Number(v) : null;
 }
 
-export function setUidValidity(v) {
-  setState('uidValidity', v);
+export function setUidValidity(userId, v) {
+  setState(`uidValidity:${userId}`, v);
 }
 
 // UIDVALIDITY өөрчлөгдвөл хуучин UID-ууд хүчингүй болно.
 // Энэ тохиолдолд lastSeenUid-г 0 болгож reset хийнэ
 // (Message-ID идэмпотентность давхар хамгаална тул давхардахгүй).
-export function handleUidValidityChange(newValidity) {
-  const old = getUidValidity();
+export function handleUidValidityChange(userId, newValidity) {
+  const old = getUidValidity(userId);
   if (old !== null && old !== Number(newValidity)) {
     logger.warn(
-      { old, new: newValidity },
+      { userId, old, new: newValidity },
       'UIDVALIDITY өөрчлөгдсөн — lastSeenUid reset хийнэ (Message-ID идэмпотентность хамгаална)'
     );
-    setLastSeenUid(0);
+    setLastSeenUid(userId, 0);
   }
-  setUidValidity(newValidity);
+  setUidValidity(userId, newValidity);
+}
+
+/**
+ * Нэг удаагийн миграц: хуучин global `lastSeenUid`/`uidValidity` утгыг owner-ийн
+ * scoped key рүү шилжүүлнэ (идемпотент — global key устгагдсаны дараа дахин орохгүй).
+ */
+export function migrateLegacyStateToUser(userId) {
+  const legacyUid = getState('lastSeenUid');
+  if (legacyUid != null && getState(`lastSeenUid:${userId}`) == null) {
+    setState(`lastSeenUid:${userId}`, legacyUid);
+    logger.info({ userId, lastSeenUid: legacyUid }, 'Хуучин lastSeenUid-г owner руу шилжүүлэв');
+  }
+  const legacyValidity = getState('uidValidity');
+  if (legacyValidity != null && getState(`uidValidity:${userId}`) == null) {
+    setState(`uidValidity:${userId}`, legacyValidity);
+  }
+  db.prepare("DELETE FROM state WHERE key IN ('lastSeenUid','uidValidity')").run();
 }
 
 // ------------------------------------------------------------
@@ -121,11 +149,11 @@ export function isProcessed(messageId) {
 // ------------------------------------------------------------
 const _insertTx = db.prepare(`
   INSERT INTO transactions (
-    message_id, uid, status, amount, currency, direction, description,
+    message_id, user_id, uid, status, amount, currency, direction, description,
     category, account_tail, tx_date, raw_subject, payload_json, error,
     attempts, created_at, updated_at
   ) VALUES (
-    @message_id, @uid, @status, @amount, @currency, @direction, @description,
+    @message_id, @user_id, @uid, @status, @amount, @currency, @direction, @description,
     @category, @account_tail, @tx_date, @raw_subject, @payload_json, @error,
     @attempts, @created_at, @updated_at
   )
@@ -136,6 +164,7 @@ export function insertTransaction(tx) {
   const ts = now();
   const row = {
     message_id: tx.messageId,
+    user_id: tx.userId ?? null,
     uid: tx.uid ?? null,
     status: tx.status,
     amount: tx.amount ?? null,

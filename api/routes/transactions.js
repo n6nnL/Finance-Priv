@@ -36,7 +36,32 @@ export function createTransactionsRouter({ db, ai }) {
         return res.status(400).json({ status: 'error', errors: result.errors });
       }
       const tx = result.data;
-      const userId = req.userId; // machine (API key) → owner; multi-tenant scope
+
+      // Multi-tenant user mapping:
+      //  - machine (API key, listener): body.userId ЗААВАЛ + бодит хэрэглэгч байх ёстой.
+      //    Owner-т fallback ХИЙХГҮЙ — буруу mapping нь privacy алдагдал тул reject.
+      //  - JWT (хэрэглэгч): үргэлж өөрийн req.userId; body.userId-г үл тоомсорлоно
+      //    (өөр хүний нэрээр push хийх боломжгүй).
+      let userId;
+      if (req.authKind === 'apikey') {
+        if (tx.userId == null) {
+          logger.warn('POST /api/transactions: machine push userId-гүй — татгалзав');
+          return res.status(400).json({
+            status: 'error',
+            errors: [{ field: 'userId', message: 'machine push-д userId заавал (owner fallback байхгүй)' }],
+          });
+        }
+        if (!db.getUserById(tx.userId)) {
+          logger.warn('POST /api/transactions: үл мэдэгдэх userId — татгалзав', { userId: tx.userId });
+          return res.status(400).json({
+            status: 'error',
+            errors: [{ field: 'userId', message: 'ийм хэрэглэгч байхгүй' }],
+          });
+        }
+        userId = tx.userId;
+      } else {
+        userId = req.userId;
+      }
 
       // 2) Давхардал шалгах (insert хийхээс өмнө — AI дуудлага дэмий хийхгүй)
       const existing = db.getByMessageId(userId, tx.messageId);

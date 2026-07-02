@@ -24,8 +24,15 @@ import { patchCategory, getTransaction } from './apiClient.js';
 //     Interaction үеийн төлөв шалгалт/бичилт нь API-аар явна (write нь
 //     шууд-DB биш, dashboard-той нийцтэй байхын тулд). ---
 const db = new DatabaseSync(config.dbPath);
-const qNew = db.prepare('SELECT * FROM transactions WHERE id > ? ORDER BY id ASC LIMIT 25');
-const qMaxId = db.prepare('SELECT COALESCE(MAX(id),0) AS m FROM transactions');
+
+// ⚠️ Discord bot ЗӨВХӨН owner-т зориулагдсан (multi-tenant Telegram-аас ялгаатай).
+// Owner = хамгийн бага id-тэй хэрэглэгч (api/db.js-ийн getOwnerUserId()-тэй ИЖИЛ
+// логик — тэр функцийг импортлох боломжгүй тул давхардуулсан). Polling query-д
+// user_id шүүлт ЗААВАЛ байхгүй бол multi-tenant Gmail идэвхжсэний дараа өөр
+// хэрэглэгчийн гүйлгээ энэ (owner-ийн) Discord суваг руу алдагдана.
+const OWNER_ID = (db.prepare('SELECT id FROM users ORDER BY id ASC LIMIT 1').get() || {}).id ?? 0;
+const qNew = db.prepare('SELECT * FROM transactions WHERE id > ? AND user_id = ? ORDER BY id ASC LIMIT 25');
+const qMaxId = db.prepare('SELECT COALESCE(MAX(id),0) AS m FROM transactions WHERE user_id = ?');
 
 // --- Bot төлөв (хамгийн сүүлд мэдэгдсэн id) ---
 function loadState() {
@@ -50,7 +57,7 @@ client.once('clientReady', async () => {
     log('info', `Үргэлжлүүлж байна, lastNotifiedId=${lastNotifiedId}`);
   } else {
     // Анх асахад: одоогийн max id-ээс эхэлнэ (хуучин түүхийг МЭДЭГДЭХГҮЙ)
-    lastNotifiedId = Number(qMaxId.get().m);
+    lastNotifiedId = Number(qMaxId.get(OWNER_ID).m);
     saveState({ lastNotifiedId });
     log('info', `Анхны асаалт — backlog алгасч, id>${lastNotifiedId}-ээс эхэлнэ`);
   }
@@ -70,7 +77,7 @@ async function poll() {
   if (polling) return; // давхцахаас сэргийлэх
   polling = true;
   try {
-    const rows = qNew.all(lastNotifiedId);
+    const rows = qNew.all(lastNotifiedId, OWNER_ID);
     if (rows.length) {
       const ch = await getChannel();
       for (const tx of rows) {

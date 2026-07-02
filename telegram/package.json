@@ -1,0 +1,18 @@
+{
+  "name": "bank-telegram-bot",
+  "version": "1.0.0",
+  "description": "Голомт гүйлгээний Telegram bot — multi-tenant мэдэгдэл + linking + товчоор ангилах",
+  "type": "module",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "dependencies": {
+    "telegraf": "^4.16.3"
+  },
+  "license": "MIT"
+}

@@ -47,12 +47,21 @@ module.exports = {
     },
     {
       ...common,
-      name: 'bank-discord', // Discord мэдэгдэл + товч/modal-аар ангилах bot
+      name: 'bank-discord', // Discord мэдэгдэл + товч/modal-аар ангилах bot (owner-only)
       script: path.join(root, 'discord', 'bot.js'),
       cwd: path.join(root, 'discord'),
       max_memory_restart: '250M',
       output: path.join(root, 'logs', 'discord-out.log'),
       error: path.join(root, 'logs', 'discord-err.log'),
+    },
+    {
+      ...common,
+      name: 'bank-telegram', // Telegram мэдэгдэл + linking + товчоор ангилах bot (multi-tenant)
+      script: path.join(root, 'telegram', 'bot.js'),
+      cwd: path.join(root, 'telegram'),
+      max_memory_restart: '200M',
+      output: path.join(root, 'logs', 'telegram-out.log'),
+      error: path.join(root, 'logs', 'telegram-err.log'),
     },
   ],
 };

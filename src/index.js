@@ -1,15 +1,18 @@
 // ============================================================
 //  index.js — Entry point. Бүх модулийг холбож ажиллуулна.
 //
-//  Урсгал:
-//    Имэйл ирэх → банкны хаягаар шүүх → идэмпотентность шалгах
-//    → parseGolomt → categorize → DB-д insert → API руу push
-//    → статус шинэчлэх
+//  Multi-tenant урсгал:
+//    API DB-ээс холбогдсон дансууд (reconcile poll) → данс бүрт IMAP IDLE
+//    → имэйл ирэх → банкны хаягаар шүүх → идэмпотентность шалгах
+//    → parseGolomt → categorize → DB-д insert (user_id-тай)
+//    → API руу push (payload.userId = тухайн дансны хэрэглэгч) → статус шинэчлэх
 // ============================================================
 
 import { config } from './config.js';
 import { logger, notifyError } from './logger.js';
 import { ImapListener } from './imap-client.js';
+import { createAccountsStore } from './accounts.js';
+import { createManager } from './manager.js';
 import { parseGolomt } from './parsers/golomt.js';
 import { categorize } from './categorize.js';
 import { pushTransaction } from './push.js';
@@ -17,6 +20,7 @@ import {
   isProcessed,
   insertTransaction,
   updateTransactionStatus,
+  migrateLegacyStateToUser,
   closeDb,
 } from './db.js';
 
@@ -30,9 +34,10 @@ function senderMatches(parsed) {
 
 /**
  * Нэг имэйлийг боловсруулах гол функц (imap-client-ээс дуудагдана).
+ * account = аль хэрэглэгчийн inbox-оос уншсан — гүйлгээ ТҮҮНД ноогдоно.
  * Алдаа гарвал throw хийхгүй — listener-ийг унтраахгүй.
  */
-async function processEmail(parsed, uid) {
+async function processEmail(account, parsed, uid) {
   const messageId = parsed.messageId ?? null;
   const subject = parsed.subject ?? '';
 
@@ -51,7 +56,7 @@ async function processEmail(parsed, uid) {
     return;
   }
 
-  logger.info({ uid, subject, messageId: idKey }, '📩 Банкны имэйл ирлээ');
+  logger.info({ uid, subject, messageId: idKey, userId: account.userId }, '📩 Банкны имэйл ирлээ');
 
   // 4) Parse — parseGolomt нь simpleParser-ийн үр дүнг ШУУД авна.
   let tx = null;
@@ -68,6 +73,7 @@ async function processEmail(parsed, uid) {
     logger.warn({ uid, subject }, '⚠️ Parse амжилтгүй (дүн олдсонгүй) — parse_failed');
     insertTransaction({
       messageId: idKey,
+      userId: account.userId,
       uid,
       status: 'parse_failed',
       subject,
@@ -82,9 +88,10 @@ async function processEmail(parsed, uid) {
 
   // 7) API payload бэлдэх — вэбсайтын API-ийн каноник гэрээтэй ИЖИЛ:
   //    messageId, amount, currency, date, description, type, category,
-  //    accountLast4, raw  (bank-api-endpoint гэрээ).
+  //    accountLast4, raw + userId (multi-tenant: API талд ЗААВАЛ, owner fallback үгүй).
   const payload = {
     messageId: idKey,
+    userId: account.userId,
     amount: tx.amount,
     currency: tx.currency,
     date: tx.date,
@@ -102,6 +109,7 @@ async function processEmail(parsed, uid) {
   //    DB-ийн дотоод багана direction/accountTail-д type/accountLast4-г буулгана.
   const inserted = insertTransaction({
     messageId: idKey,
+    userId: account.userId,
     uid,
     status: 'push_failed', // түр төлөв; push амжилттай бол pushed болгоно
     amount: tx.amount,
@@ -140,18 +148,24 @@ async function processEmail(parsed, uid) {
 }
 
 // ------------------------------------------------------------
-// Heartbeat: тогтмол "alive" log + удаан имэйлгүй бол warning
+// Heartbeat: данс бүрийн "alive" log + удаан имэйлгүй бол warning
 // ------------------------------------------------------------
-function startHeartbeat(listener) {
+function startHeartbeat(manager) {
   const intervalMs = config.heartbeatSeconds * 1000;
   const warnMs = config.idleWarnMinutes * 60 * 1000;
   const timer = setInterval(() => {
-    const since = listener.msSinceLastMessage();
-    const mins = Math.round(since / 60000);
-    if (since > warnMs) {
-      logger.warn({ minutesSinceLastEmail: mins }, '💓 Heartbeat — удаан имэйл ирээгүй (warning)');
-    } else {
-      logger.info({ minutesSinceLastEmail: mins }, '💓 Heartbeat — alive');
+    const statuses = manager.statuses();
+    if (statuses.length === 0) {
+      logger.info('💓 Heartbeat — холбогдсон данс алга (Gmail холбохыг хүлээж байна)');
+      return;
+    }
+    for (const s of statuses) {
+      const mins = Math.round(s.msSinceLastMessage / 60000);
+      if (s.msSinceLastMessage > warnMs) {
+        logger.warn({ email: s.email, minutesSinceLastEmail: mins }, '💓 Heartbeat — удаан имэйл ирээгүй (warning)');
+      } else {
+        logger.info({ email: s.email, minutesSinceLastEmail: mins }, '💓 Heartbeat — alive');
+      }
     }
   }, intervalMs);
   if (timer.unref) timer.unref();
@@ -164,21 +178,67 @@ function startHeartbeat(listener) {
 async function main() {
   logger.info(
     { mailbox: config.gmail.mailbox, sender: config.bankSender, api: config.website.apiUrl },
-    '🚀 Bank email listener эхэлж байна'
+    '🚀 Bank email listener эхэлж байна (multi-tenant)'
   );
 
-  const listener = new ImapListener(processEmail);
-  const heartbeat = startHeartbeat(listener);
+  const accounts = createAccountsStore({
+    apiDbPath: config.apiDbPath,
+    tokenEncKey: config.tokenEncKey,
+  });
+
+  // Нэг удаагийн шилжилт: хуучин .env-ийн GMAIL_REFRESH_TOKEN → owner-ийн
+  // Gmail холболт (шифрлэгдэж DB-д). Мөн хуучин global lastSeenUid → owner scoped.
+  if (config.oauth.refreshToken) {
+    const seeded = accounts.seedOwnerFromEnv({
+      refreshToken: config.oauth.refreshToken,
+      email: config.gmail.user,
+    });
+    if (seeded) logger.info('Owner-ийн Gmail холболтыг .env-ээс seed хийлээ (шифрлэгдсэн)');
+  }
+  const firstAccount = accounts.listActiveAccounts()[0];
+  if (firstAccount) migrateLegacyStateToUser(firstAccount.userId);
+
+  const manager = createManager({
+    listAccounts: () => accounts.listActiveAccounts(),
+    createListener: (acc) => new ImapListener({
+      userId: acc.userId,
+      email: acc.email,
+      refreshToken: acc.refreshToken,
+      onMessage: (parsed, uid) => processEmail(acc, parsed, uid),
+      onAuthError: () => {
+        // invalid_grant → энэ хэрэглэгч дахин холбох шаардлагатай; бусад үргэлжилнэ
+        logger.warn({ userId: acc.userId, email: acc.email }, 'invalid_grant — gmail_status=reauth_needed');
+        try { accounts.markReauthNeeded(acc.userId); } catch (err) {
+          logger.error({ err: err?.message }, 'reauth_needed тэмдэглэхэд алдаа');
+        }
+        // Owner admin observability: тухайн хэрэглэгч дахин холбогдох хэрэгтэйг owner-т мэдэгдэнэ.
+        notifyError('gmail-reauth-needed', new Error(`Gmail дахин холбох шаардлагатай: ${acc.email}`));
+      },
+    }),
+    logger,
+  });
+
+  const heartbeat = startHeartbeat(manager);
+
+  // Reconcile: эхэлмэгц нэг удаа, дараа нь тогтмол интервалд (данс нэмэгдэх/
+  // хасагдахыг процесс restart-гүйгээр барина). unref ХИЙХГҮЙ — данс 0 үед ч
+  // энэ interval процессыг амьд барьж, Gmail холбогдохыг хүлээнэ.
+  await manager.reconcile();
+  const reconcileTimer = setInterval(() => {
+    manager.reconcile().catch((err) => logger.error({ err: err?.message }, 'reconcile алдаа'));
+  }, config.accountsPollSeconds * 1000);
 
   // Graceful shutdown
   const shutdown = async (signal) => {
     logger.info({ signal }, 'Зогсоох дохио — graceful shutdown');
     clearInterval(heartbeat);
+    clearInterval(reconcileTimer);
     try {
-      await listener.stop();
+      await manager.stopAll();
     } catch (err) {
       logger.error({ err: err?.message }, 'Listener зогсооход алдаа');
     }
+    accounts.close();
     closeDb();
     process.exit(0);
   };
@@ -195,8 +255,8 @@ async function main() {
     notifyError('uncaughtException', err);
   });
 
-  // Listener-ийг ажиллуулах (stopped болтол буцахгүй, дотроо reconnect хийнэ)
-  await listener.run();
+  // main() эндээс буцна — reconcile interval (ref-тэй) процессыг амьд барина;
+  // listener-үүд manager дотор background ажиллана.
 }
 
 main().catch(async (err) => {

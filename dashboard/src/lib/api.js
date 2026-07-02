@@ -87,6 +87,23 @@ export function loginWithGoogle() {
 }
 
 /**
+ * Google Calendar холбох (Settings-ээс, JWT шаардсан). Эхлээд Authorization
+ * header-тэй fetch-ээр consent URL авч, дараа нь browser-г өөрөө тийш нь
+ * navigate хийнэ (JWT localStorage-д байгаа тул шууд navigate хийвэл header
+ * дамжихгүй — access token URL-д хэзээ ч орохгүй байх зорилготой).
+ */
+export async function connectCalendar() {
+  const r = await req('/api/auth/google/calendar');
+  if (r.url) window.location.assign(r.url);
+}
+
+/** Gmail (банкны мэдэгдэл) холбох — calendar-тай ижил загвар. */
+export async function connectGmail() {
+  const r = await req('/api/auth/gmail/connect');
+  if (r.url) window.location.assign(r.url);
+}
+
+/**
  * OAuth callback: browser-ийн URL fragment (#access=...&refresh=...)-аас JWT
  * задлаж localStorage-д хадгална. Дараа нь fragment-г цэвэрлэнэ (token түүхэнд
  * үлдээхгүй). Токен олдвол true.
@@ -146,6 +163,15 @@ export const api = {
   budgetStatus: () => req('/api/budget-status?cycle=current'),
   budgetAllocations: () => req('/api/budget-allocations'),
   saveBudgetAllocations: (allocations) => req('/api/budget-allocations', { method: 'PUT', body: { allocations } }),
+  // ---- Google Calendar холболт (Settings) ----
+  connectCalendar,
+  disconnectCalendar: () => req('/api/auth/google/calendar/disconnect', { method: 'POST' }),
+  // ---- Gmail холболт (Settings — банкны мэдэгдэл сонсох) ----
+  connectGmail,
+  disconnectGmail: () => req('/api/auth/gmail/disconnect', { method: 'POST' }),
+  // ---- Telegram холболт (Settings — мэдэгдэл + товчоор ангилах) ----
+  telegramLinkCode: () => req('/api/telegram/link-code', { method: 'POST' }),
+  disconnectTelegram: () => req('/api/telegram/unlink', { method: 'POST' }),
 };
 
 export default api;

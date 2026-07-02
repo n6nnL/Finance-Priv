@@ -40,6 +40,19 @@ export default function Calendar() {
     return () => { alive = false; };
   }, []);
 
+  // Calendar/Gmail холбох flow-оос буцахад (?settings=1 / алдааны query) Settings панелийг шууд нээнэ.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('settings') === '1' || params.get('calendarError') === '1' || params.get('gmailError') === '1') {
+      setShowSettings(true);
+      params.delete('settings');
+      params.delete('calendarError');
+      params.delete('gmailError');
+      const qs = params.toString();
+      history.replaceState(null, '', window.location.pathname + (qs ? `?${qs}` : ''));
+    }
+  }, []);
+
   // Тохиргоо хадгалах (optimistic + debounced PUT + баталгаажуулалт)
   const persist = useCallback((next) => {
     setSettings(next);

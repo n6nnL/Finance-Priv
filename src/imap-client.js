@@ -30,17 +30,30 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export class ImapListener {
   /**
-   * @param {(email: object, uid: number) => Promise<void>} onMessage
+   * Multi-tenant: нэг instance = нэг хэрэглэгчийн inbox. Хэрэглэгч бүрийн
+   * холболт тусдаа run() loop-тэй — нэгийх нь алдаа бусдад нөлөөлөхгүй.
+   *
+   * @param {{
+   *   userId: number,
+   *   email: string,                — IMAP auth.user (холбогдсон Gmail хаяг)
+   *   refreshToken: string,
+   *   onMessage: (email: object, uid: number) => Promise<void>,
+   *   onAuthError?: () => void      — invalid_grant үед (reauth_needed тэмдэглэх)
+   * }} opts
    */
-  constructor(onMessage) {
+  constructor({ userId, email, refreshToken, onMessage, onAuthError = null }) {
+    this.userId = userId;
+    this.email = email;
+    this.refreshToken = refreshToken;
     this.onMessage = onMessage;
+    this.onAuthError = onAuthError;
     this.client = null;
     this.oauthClient = new OAuth2Client(
       config.oauth.clientId,
       config.oauth.clientSecret,
       config.oauth.redirectUri
     );
-    this.oauthClient.setCredentials({ refresh_token: config.oauth.refreshToken });
+    this.oauthClient.setCredentials({ refresh_token: refreshToken });
 
     this.backoffMs = 1000; // эхлэх backoff (1с)
     this.maxBackoffMs = 60_000; // дээд тал (60с)
@@ -87,7 +100,7 @@ export class ImapListener {
       port: 993,
       secure: true,
       auth: {
-        user: config.gmail.user,
+        user: this.email,
         accessToken,
       },
       logger: false, // imapflow-ийн дотоод лог унтраана (өөрийн logger ашиглана)
@@ -98,7 +111,7 @@ export class ImapListener {
     // Холболтын түвшний алдаа — listener-ийг бүхэлд нь унтраахгүй,
     // зүгээр л logout эвдэрвэл run() loop reconnect хийнэ.
     this.client.on('error', (err) => {
-      logger.warn({ err: err?.message }, 'IMAP client error event');
+      logger.warn({ email: this.email, err: err?.message }, 'IMAP client error event');
     });
 
     // Холболт хаагдвал run() loop-ийг үргэлжлүүлэх promise-ийг тайлна.
@@ -107,12 +120,12 @@ export class ImapListener {
       this._resolveClosed = resolve;
     });
     this.client.on('close', () => {
-      logger.warn('IMAP холболт хаагдлаа (close event)');
+      logger.warn({ email: this.email }, 'IMAP холболт хаагдлаа (close event)');
       if (this._resolveClosed) this._resolveClosed();
     });
 
     await this.client.connect();
-    logger.info({ user: config.gmail.user }, '✅ Gmail IMAP холбогдлоо');
+    logger.info({ user: this.email }, '✅ Gmail IMAP холбогдлоо');
     this.consecutiveFailures = 0;
     // Амжилттай холболт = token refresh ч бас амжилттай. Өмнө асаж байсан
     // OAuth/reconnect сэрэмжлүүлэг байвал ЯГ нэг "✅ recovered" илгээнэ
@@ -124,9 +137,9 @@ export class ImapListener {
     // автоматаар IDLE барьж, шинэ имэйл ирэхэд 'exists' event асаана.
     const mailbox = await this.client.mailboxOpen(config.gmail.mailbox);
 
-    // UIDVALIDITY шалгах (өөрчлөгдсөн бол lastSeenUid reset)
+    // UIDVALIDITY шалгах (өөрчлөгдсөн бол lastSeenUid reset) — per-user scoped
     if (mailbox?.uidValidity != null) {
-      handleUidValidityChange(Number(mailbox.uidValidity));
+      handleUidValidityChange(this.userId, Number(mailbox.uidValidity));
     }
 
     // --- IDLE event listener-ийг эхлээд тавина (catch-up явж байх зуур
@@ -165,9 +178,9 @@ export class ImapListener {
    */
   async catchUp() {
     if (!this.client || this.client.usable === false) return;
-    const lastUid = getLastSeenUid();
+    const lastUid = getLastSeenUid(this.userId);
     const range = `${lastUid + 1}:*`;
-    logger.info({ from: lastUid + 1 }, 'Catch-up эхэллээ');
+    logger.info({ email: this.email, from: lastUid + 1 }, 'Catch-up эхэллээ');
     let processed = 0;
     try {
       // uid: true → range-г UID-ээр тайлбарлана
@@ -195,7 +208,7 @@ export class ImapListener {
    */
   async fetchNew() {
     if (!this.client || this.client.usable === false) return;
-    const lastUid = getLastSeenUid();
+    const lastUid = getLastSeenUid(this.userId);
     const range = `${lastUid + 1}:*`;
     for await (const msg of this.client.fetch(
       range,
@@ -218,13 +231,13 @@ export class ImapListener {
       await this.onMessage(parsed, msg.uid);
     } catch (err) {
       // Нэг имэйлийн алдаа бусдыг зогсоохгүй
-      logger.error({ uid: msg.uid, err: err?.message }, 'Имэйл боловсруулах алдаа');
+      logger.error({ email: this.email, uid: msg.uid, err: err?.message }, 'Имэйл боловсруулах алдаа');
       await notifyError('handle-message', err);
     } finally {
       // UID-г аль ч тохиолдолд урагшлуулна (parse алдаа гарсан ч дахин уншихгүй).
       // Идэмпотентность Message-ID-ээр давхар хамгаалагдсан.
-      if (msg.uid > getLastSeenUid()) {
-        setLastSeenUid(msg.uid);
+      if (msg.uid > getLastSeenUid(this.userId)) {
+        setLastSeenUid(this.userId, msg.uid);
       }
     }
   }
@@ -302,16 +315,25 @@ export class ImapListener {
       } catch (err) {
         this.consecutiveFailures++;
         logger.error(
-          { err: err?.message, failures: this.consecutiveFailures, backoffMs: this.backoffMs },
+          { email: this.email, err: err?.message, failures: this.consecutiveFailures, backoffMs: this.backoffMs },
           'Холболт алдаа — reconnect хийнэ'
         );
-        // OAuth invalid_grant нь бараг хэзээ ч түр зуурын биш — ЭХНИЙ удаад
-        // сэрэмжлүүлнэ (incident: 88 цикл чимээгүй байсан). Бусад тасрал нь
-        // дараалсан 5 удаа давтагдвал "reconnect loop" гэж үзнэ.
-        // (notifyError доторх ops-notify debounce давталтыг 15 мин дарна.)
+        // OAuth invalid_grant нь бараг хэзээ ч түр зуурын биш — ЭНЭ хэрэглэгчийн
+        // listener-ийг зогсоож reauth_needed тэмдэглэнэ (onAuthError → DB флаг +
+        // dashboard-д "дахин холбоно уу"). БУСАД хэрэглэгчийн listener үргэлжилнэ.
+        // (incident: 88 цикл чимээгүй байсан тул мөн сэрэмжлүүлнэ.)
         if (/invalid_grant/i.test(err?.message || '')) {
           await notifyError('oauth-invalid-grant', err);
-        } else if (this.consecutiveFailures >= 5) {
+          if (this.onAuthError) {
+            try { this.onAuthError(); } catch { /* ignore */ }
+          }
+          this.stopped = true;
+          await this.closeClient();
+          break;
+        }
+        // Бусад тасрал нь дараалсан 5 удаа давтагдвал "reconnect loop" гэж үзнэ.
+        // (notifyError доторх ops-notify debounce давталтыг 15 мин дарна.)
+        if (this.consecutiveFailures >= 5) {
           await notifyError('imap-reconnect-loop', err);
         }
         await this.closeClient();
@@ -325,7 +347,7 @@ export class ImapListener {
       await this.closeClient();
       if (!this.stopped) await sleep(500);
     }
-    logger.info('IMAP listener зогслоо');
+    logger.info({ email: this.email }, 'IMAP listener зогслоо');
   }
 
   /**

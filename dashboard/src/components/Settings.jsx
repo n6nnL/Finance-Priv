@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { money } from '../lib/format.js';
+import { api } from '../lib/api.js';
 
 // Тохиргооны форм — цалин/payday/ханш/захиалга/хуваарилалт. Хэрэглэгч засна,
 // "Хадгалах" дээр sanitize хийгээд onSave(settings) дуудна (Calendar PUT хийнэ).
@@ -39,6 +40,55 @@ export default function Settings({ settings, onSave, onClose, saving }) {
   const [draft, setDraft] = useState(settings);
   const [savedAt, setSavedAt] = useState(0);
   useEffect(() => { setDraft(settings); }, [settings]);
+
+  // Google Calendar + Gmail холболтын төлөв (энэ component өөрөө /me-ээс уншина).
+  const [calendarConnected, setCalendarConnected] = useState(null); // null = ачаалж байна
+  const [calendarBusy, setCalendarBusy] = useState(false);
+  const [gmail, setGmail] = useState(null); // null | { connected, status, email }
+  const [gmailBusy, setGmailBusy] = useState(false);
+  const [telegramConnected, setTelegramConnected] = useState(null); // null = ачаалж байна
+  const [telegramCode, setTelegramCode] = useState(null); // { code, expiresAt } | null
+  const [telegramBusy, setTelegramBusy] = useState(false);
+  const refetchConnections = () => api.me().then((r) => {
+    setCalendarConnected(!!r.user?.calendarConnected);
+    setGmail({
+      connected: !!r.user?.gmailConnected,
+      status: r.user?.gmailStatus || '',
+      email: r.user?.gmailEmail || null,
+    });
+    setTelegramConnected(!!r.user?.telegramConnected);
+  }).catch(() => {});
+  useEffect(() => { refetchConnections(); }, []);
+
+  const connectCalendar = async () => {
+    setCalendarBusy(true);
+    try { await api.connectCalendar(); } catch { setCalendarBusy(false); }
+  };
+  const disconnectCalendar = async () => {
+    setCalendarBusy(true);
+    try { await api.disconnectCalendar(); await refetchConnections(); }
+    finally { setCalendarBusy(false); }
+  };
+  const connectGmail = async () => {
+    setGmailBusy(true);
+    try { await api.connectGmail(); } catch { setGmailBusy(false); }
+  };
+  const disconnectGmail = async () => {
+    setGmailBusy(true);
+    try { await api.disconnectGmail(); await refetchConnections(); }
+    finally { setGmailBusy(false); }
+  };
+  const requestTelegramCode = async () => {
+    setTelegramBusy(true);
+    try { setTelegramCode(await api.telegramLinkCode()); }
+    catch { /* ignore */ }
+    finally { setTelegramBusy(false); }
+  };
+  const disconnectTelegram = async () => {
+    setTelegramBusy(true);
+    try { await api.disconnectTelegram(); setTelegramCode(null); await refetchConnections(); }
+    finally { setTelegramBusy(false); }
+  };
 
   const set = (patch) => setDraft((d) => ({ ...d, ...patch }));
   const setSub = (i, patch) => set({ subscriptions: draft.subscriptions.map((x, j) => (j === i ? { ...x, ...patch } : x)) });
@@ -131,6 +181,110 @@ export default function Settings({ settings, onSave, onClose, saving }) {
           </div>
         ))}
         <div className="text-[13px] text-[#8C8578] whitespace-nowrap">Нийт хуваарилсан: {money(allocTotal)}</div>
+      </div>
+
+      {/* Gmail (банкны мэдэгдэл) */}
+      <div className="flex flex-col gap-[10px]">
+        <div className="text-[14px] font-semibold text-[#4A453D]">Gmail (банкны мэдэгдэл)</div>
+        {gmail === null && (
+          <div className="text-[13px] text-[#A39A8A]">Шалгаж байна…</div>
+        )}
+        {gmail && gmail.connected && gmail.status === 'reauth_needed' && (
+          <div className="flex flex-col sm:flex-row gap-[8px] sm:items-center">
+            <span className="text-[13px] font-medium text-[#C2698F]">⚠ Gmail-ийн зөвшөөрөл хүчингүй болсон — дахин холбоно уу</span>
+            <button onClick={connectGmail} disabled={gmailBusy}
+              className="h-[36px] px-[14px] border border-cream-border bg-white rounded-[9px] text-[13px] font-medium text-[#1F7A6B] cursor-pointer whitespace-nowrap shrink-0 disabled:opacity-60">
+              {gmailBusy ? 'Холбож байна…' : 'Дахин холбох'}
+            </button>
+          </div>
+        )}
+        {gmail && gmail.connected && gmail.status !== 'reauth_needed' && (
+          <div className="flex flex-col sm:flex-row gap-[8px] sm:items-center">
+            <span className="text-[13px] font-medium text-[#1F7A6B] min-w-0 truncate">✓ Холбогдсон{gmail.email ? `: ${gmail.email}` : ''}</span>
+            <button onClick={disconnectGmail} disabled={gmailBusy}
+              className="h-[36px] px-[14px] border border-cream-border bg-white rounded-[9px] text-[13px] font-medium text-[#C2698F] cursor-pointer whitespace-nowrap shrink-0 disabled:opacity-60">
+              {gmailBusy ? 'Салгаж байна…' : 'Салгах'}
+            </button>
+          </div>
+        )}
+        {gmail && !gmail.connected && (
+          <div className="flex flex-col sm:flex-row gap-[8px] sm:items-center">
+            <span className="text-[13px] text-[#A39A8A]">Банкны мэдэгдэл ирдэг Gmail-аа холбоход гүйлгээ автоматаар бүртгэгдэнэ.</span>
+            <button onClick={connectGmail} disabled={gmailBusy}
+              className="h-[36px] px-[14px] border border-cream-border bg-white rounded-[9px] text-[13px] font-medium text-[#1F7A6B] cursor-pointer whitespace-nowrap shrink-0 disabled:opacity-60">
+              {gmailBusy ? 'Холбож байна…' : 'Gmail холбох'}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Telegram (мэдэгдэл + товчоор ангилах) */}
+      <div className="flex flex-col gap-[10px]">
+        <div className="text-[14px] font-semibold text-[#4A453D]">Telegram</div>
+        {telegramConnected === null && (
+          <div className="text-[13px] text-[#A39A8A]">Шалгаж байна…</div>
+        )}
+        {telegramConnected === true && (
+          <div className="flex flex-col sm:flex-row gap-[8px] sm:items-center">
+            <span className="text-[13px] font-medium text-[#1F7A6B] whitespace-nowrap">✓ Холбогдсон</span>
+            <button onClick={disconnectTelegram} disabled={telegramBusy}
+              className="h-[36px] px-[14px] border border-cream-border bg-white rounded-[9px] text-[13px] font-medium text-[#C2698F] cursor-pointer whitespace-nowrap shrink-0 disabled:opacity-60">
+              {telegramBusy ? 'Салгаж байна…' : 'Салгах'}
+            </button>
+          </div>
+        )}
+        {telegramConnected === false && !telegramCode && (
+          <div className="flex flex-col sm:flex-row gap-[8px] sm:items-center">
+            <span className="text-[13px] text-[#A39A8A]">Холбогдоогүй. Гүйлгээний мэдэгдэл авах, товчоор шууд ангилах боломжтой болно.</span>
+            <button onClick={requestTelegramCode} disabled={telegramBusy}
+              className="h-[36px] px-[14px] border border-cream-border bg-white rounded-[9px] text-[13px] font-medium text-[#1F7A6B] cursor-pointer whitespace-nowrap shrink-0 disabled:opacity-60">
+              {telegramBusy ? 'Үүсгэж байна…' : 'Telegram холбох'}
+            </button>
+          </div>
+        )}
+        {telegramConnected === false && telegramCode && (
+          <div className="flex flex-col gap-[8px]">
+            <div className="text-[13px] text-[#4A453D]">
+              Telegram bot-оо нээгээд доорх мессежийг илгээнэ үү (10 минутын дотор):
+            </div>
+            <div className="flex items-center gap-[8px]">
+              <code className="h-[42px] px-[14px] flex items-center border-[1.5px] border-cream-input rounded-[10px] bg-white font-mono text-[16px] font-semibold tracking-wide">
+                /link {telegramCode.code}
+              </code>
+              <button onClick={requestTelegramCode} disabled={telegramBusy}
+                className="h-[36px] px-[12px] border border-cream-border bg-white rounded-[9px] text-[13px] font-medium text-[#1F7A6B] cursor-pointer whitespace-nowrap shrink-0 disabled:opacity-60">
+                Шинэ код
+              </button>
+            </div>
+            <div className="text-[13px] text-[#A39A8A]">Холбогдсоны дараа энэ хуудсыг сэргээгээд шалгана уу.</div>
+          </div>
+        )}
+      </div>
+
+      {/* Google Calendar */}
+      <div className="flex flex-col gap-[10px]">
+        <div className="text-[14px] font-semibold text-[#4A453D]">Календарь</div>
+        {calendarConnected === null && (
+          <div className="text-[13px] text-[#A39A8A]">Шалгаж байна…</div>
+        )}
+        {calendarConnected === true && (
+          <div className="flex flex-col sm:flex-row gap-[8px] sm:items-center">
+            <span className="text-[13px] font-medium text-[#1F7A6B] whitespace-nowrap">✓ Google Calendar холбогдсон</span>
+            <button onClick={disconnectCalendar} disabled={calendarBusy}
+              className="h-[36px] px-[14px] border border-cream-border bg-white rounded-[9px] text-[13px] font-medium text-[#C2698F] cursor-pointer whitespace-nowrap shrink-0 disabled:opacity-60">
+              {calendarBusy ? 'Салгаж байна…' : 'Салгах'}
+            </button>
+          </div>
+        )}
+        {calendarConnected === false && (
+          <div className="flex flex-col sm:flex-row gap-[8px] sm:items-center">
+            <span className="text-[13px] text-[#A39A8A]">Холбогдоогүй.</span>
+            <button onClick={connectCalendar} disabled={calendarBusy}
+              className="h-[36px] px-[14px] border border-cream-border bg-white rounded-[9px] text-[13px] font-medium text-[#1F7A6B] cursor-pointer whitespace-nowrap shrink-0 disabled:opacity-60">
+              {calendarBusy ? 'Холбож байна…' : 'Google календарь холбох'}
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Save */}

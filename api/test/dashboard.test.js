@@ -35,7 +35,8 @@ const patch = (path, body) => fetch(`${baseUrl}${path}`, { method: 'PATCH', head
 const get = (path, headers = { 'X-API-Key': API_KEY }) => fetch(`${baseUrl}${path}`, { headers });
 
 let mid = 0;
-const tx = (over = {}) => ({ messageId: `<m${++mid}>`, amount: 10000, currency: 'MNT', date: '2026-06-08', type: 'expense', description: 'X', ...over });
+// userId: OWNER — machine push-д заавал (multi-tenant contract)
+const tx = (over = {}) => ({ userId: OWNER, messageId: `<m${++mid}>`, amount: 10000, currency: 'MNT', date: '2026-06-08', type: 'expense', description: 'X', ...over });
 
 test('дүрмээр танигдах (SocialPay) → classified, Захиалга & сервис', async () => {
   const r = await post('/api/transactions', tx({ description: 'SocialPay гүйлгэ' }));
@@ -103,7 +104,7 @@ test('AI идэвхгүй / алдаа → pending, санал null (зогсо�
   const app = createApp({ db: d, ai: { enabled: false, aiCategorize: async () => { throw new Error('x'); } }, apiKey: API_KEY, jwtSecret: JWT_SECRET, rateLimit: { windowSeconds: 60, max: 100000 } });
   const srv = await new Promise((r) => { const s = app.listen(0, () => r(s)); });
   const url = `http://127.0.0.1:${srv.address().port}`;
-  const res = await fetch(`${url}/api/transactions`, { method: 'POST', headers: H, body: JSON.stringify({ messageId: '<aioff>', amount: 5000, currency: 'MNT', date: '2026-06-08', type: 'expense', description: '0930 ZZUNKNOWNAI' }) });
+  const res = await fetch(`${url}/api/transactions`, { method: 'POST', headers: H, body: JSON.stringify({ userId: d.getOwnerUserId(), messageId: '<aioff>', amount: 5000, currency: 'MNT', date: '2026-06-08', type: 'expense', description: '0930 ZZUNKNOWNAI' }) });
   assert.equal((await res.json()).txStatus, 'pending_review');
   assert.equal(d.getByMessageId(d.getOwnerUserId(), '<aioff>').ai_suggested_category, null);
   await new Promise((r) => srv.close(r)); d.close();

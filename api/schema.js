@@ -53,6 +53,9 @@ export const TransactionSchema = z.object({
   accountLast4: z.string().max(8).optional().nullable(),
   raw: z.string().optional().nullable(),
   isPos: z.boolean().optional().nullable(), // listener parser-аас (BOM дүрэм)
+  // Multi-tenant listener: аль хэрэглэгчийн inbox-оос ирсэн гүйлгээ вэ.
+  // Machine (API key) push-д ЗААВАЛ (route талд шалгана); JWT push-д үл тоомсорлоно.
+  userId: z.number().int().positive().optional().nullable(),
 });
 
 /**

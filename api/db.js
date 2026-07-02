@@ -18,6 +18,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isoDate } from '../config/txfields.js';
 import { DEFAULT_CATEGORY } from '../config/categories.js';
+import { encryptToken, decryptToken, isEncrypted } from '../config/tokenCrypto.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -75,6 +76,12 @@ export const DEFAULT_ALLOC_PERCENTS = [
 
 export function createDb(dbPath, opts = {}) {
   if (dbPath && dbPath !== ':memory:') mkdirSync(dirname(dbPath), { recursive: true });
+
+  // Token encryption at rest — TOKEN_ENC_KEY (32 byte hex). Байхгүй бол plaintext
+  // (зөвхөн хуучин тест/dev нийцтэй байдалд); prod-д server.js required() болгодог.
+  const tokenEncKey = opts.tokenEncKey || '';
+  const encTok = (v) => (tokenEncKey ? encryptToken(v, tokenEncKey) : v);
+  const decTok = (v) => (tokenEncKey ? decryptToken(v, tokenEncKey) : v);
 
   const db = new DatabaseSync(dbPath || ':memory:');
   db.exec('PRAGMA journal_mode = WAL');
@@ -196,6 +203,64 @@ export function createDb(dbPath, opts = {}) {
       percent REAL NOT NULL DEFAULT 0,
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
       PRIMARY KEY (user_id, category))`);
+
+    // 009: MULTI-TENANT GMAIL — per-user Gmail холболт + token шифрлэлт -------
+    // google_tokens дээр Gmail-ийн тусдаа баганууд (calendar-тай зэрэгцэнэ).
+    // gmail_status: 'active' | 'reauth_needed' | '' (listener нэг хэрэглэгчийн
+    // invalid_grant-д reauth_needed тавьж, бусад хэрэглэгчийг үргэлжлүүлнэ).
+    for (const [c, def] of [
+      ['gmail_refresh_token', 'ALTER TABLE google_tokens ADD COLUMN gmail_refresh_token TEXT'],
+      ['gmail_scope', 'ALTER TABLE google_tokens ADD COLUMN gmail_scope TEXT'],
+      // Холбогдсон inbox-ийн бодит Gmail хаяг (login email-ээс өөр байж болно) —
+      // listener IMAP XOAUTH2-д auth.user болж хэрэглэгдэнэ.
+      ['gmail_email', 'ALTER TABLE google_tokens ADD COLUMN gmail_email TEXT'],
+      ['gmail_connected', 'ALTER TABLE google_tokens ADD COLUMN gmail_connected INTEGER NOT NULL DEFAULT 0'],
+      ['gmail_status', "ALTER TABLE google_tokens ADD COLUMN gmail_status TEXT NOT NULL DEFAULT ''"],
+    ]) {
+      if (!hasColumn('google_tokens', c)) db.exec(def);
+    }
+    // Backfill: хуучин plaintext token-уудыг шифрлэнэ (нэг удаа, идемпотент —
+    // enc:v1: префикстэйг дахин шифрлэхгүй). Зөвхөн key тохируулагдсан үед.
+    if (tokenEncKey) {
+      const rows = db.prepare(
+        `SELECT user_id, refresh_token, gmail_refresh_token FROM google_tokens
+         WHERE refresh_token IS NOT NULL OR gmail_refresh_token IS NOT NULL`
+      ).all();
+      const upd = db.prepare('UPDATE google_tokens SET refresh_token=?, gmail_refresh_token=? WHERE user_id=?');
+      for (const r of rows) {
+        const needCal = r.refresh_token && !isEncrypted(r.refresh_token);
+        const needGm = r.gmail_refresh_token && !isEncrypted(r.gmail_refresh_token);
+        if (needCal || needGm) {
+          upd.run(
+            r.refresh_token ? encryptToken(r.refresh_token, tokenEncKey) : r.refresh_token,
+            r.gmail_refresh_token ? encryptToken(r.gmail_refresh_token, tokenEncKey) : r.gmail_refresh_token,
+            r.user_id
+          );
+        }
+      }
+    }
+
+    // 010: TELEGRAM ХОЛБОЛТ (multi-tenant bot) -------------------------------
+    // telegram_links: 1 хэрэглэгч ↔ 1 chat (хоёулаа UNIQUE). Bot процесс ЭНЭ
+    // хүснэгтэд шууд унших/бичих эрхтэй (санхүүгийн өгөгдөл БИШ, зөвхөн mapping).
+    db.exec(`CREATE TABLE IF NOT EXISTS telegram_links (
+      user_id INTEGER PRIMARY KEY,
+      chat_id TEXT NOT NULL UNIQUE,
+      linked_at TEXT NOT NULL DEFAULT (datetime('now')))`);
+    // Нэг удаагийн linking код (dashboard-аас generate, bot-д consume).
+    db.exec(`CREATE TABLE IF NOT EXISTS telegram_link_codes (
+      code TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      expires_at TEXT NOT NULL,
+      used INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')))`);
+    // Идэмпотентность: нэг гүйлгээг нэг chat-д давхар мэдэгдэхгүй.
+    db.exec(`CREATE TABLE IF NOT EXISTS telegram_notifications (
+      transaction_id INTEGER NOT NULL,
+      chat_id TEXT NOT NULL,
+      message_id TEXT,
+      sent_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (transaction_id, chat_id))`);
   }
   migrate();
 
@@ -593,17 +658,121 @@ export function createDb(dbPath, opts = {}) {
       updated_at = excluded.updated_at`);
 
   /** Calendar token хадгалах. refresh_token null бол хуучныг хэвээр (Google зөвхөн
-   *  анхны consent дээр refresh_token буцаадаг). НУУЦ — API хариуд буцаахгүй. */
+   *  анхны consent дээр refresh_token буцаадаг). НУУЦ — шифрлэгдэж хадгалагдана,
+   *  API хариуд буцаахгүй. */
   function saveGoogleTokens(userId, { refreshToken = null, scope = '' } = {}) {
     const calendar = String(scope || '').includes('calendar') ? 1 : 0;
     _saveGoogleTokens.run({
-      user_id: userId, refresh_token: refreshToken || null,
+      user_id: userId, refresh_token: refreshToken ? encTok(refreshToken) : null,
       scope: String(scope || ''), calendar_connected: calendar,
     });
     return getGoogleTokens(userId);
   }
+  /** refresh_token-уудыг тайлсан (decrypt) байдлаар буцаана — зөвхөн дотоод хэрэглээ. */
   function getGoogleTokens(userId) {
-    return db.prepare('SELECT user_id, refresh_token, scope, calendar_connected, updated_at FROM google_tokens WHERE user_id = ?').get(userId) ?? null;
+    const row = db.prepare('SELECT * FROM google_tokens WHERE user_id = ?').get(userId) ?? null;
+    if (!row) return null;
+    return {
+      ...row,
+      refresh_token: row.refresh_token ? decTok(row.refresh_token) : row.refresh_token,
+      gmail_refresh_token: row.gmail_refresh_token ? decTok(row.gmail_refresh_token) : row.gmail_refresh_token,
+    };
+  }
+
+  const _disconnectGoogleTokens = db.prepare(
+    `UPDATE google_tokens SET refresh_token=NULL, scope='', calendar_connected=0, updated_at=datetime('now') WHERE user_id=?`
+  );
+  /** Хэрэглэгч Settings-ээс "Салгах" дарахад — token устгаж flag-ыг 0 болгоно. */
+  function disconnectGoogleCalendar(userId) {
+    _disconnectGoogleTokens.run(userId);
+  }
+
+  // ===================== GMAIL ХОЛБОЛТ (per-user, multi-tenant listener) =====================
+  const _saveGmailTokens = db.prepare(`INSERT INTO google_tokens
+      (user_id, gmail_refresh_token, gmail_scope, gmail_email, gmail_connected, gmail_status, updated_at)
+    VALUES (@user_id, @gmail_refresh_token, @gmail_scope, @gmail_email, 1, 'active', datetime('now'))
+    ON CONFLICT(user_id) DO UPDATE SET
+      gmail_refresh_token = COALESCE(excluded.gmail_refresh_token, google_tokens.gmail_refresh_token),
+      gmail_scope = excluded.gmail_scope,
+      gmail_email = COALESCE(excluded.gmail_email, google_tokens.gmail_email),
+      gmail_connected = 1,
+      gmail_status = 'active',
+      updated_at = excluded.updated_at`);
+
+  /** Gmail refresh token хадгалах (шифрлэгдэнэ). email = холбогдсон inbox-ийн бодит
+   *  Gmail хаяг (IMAP auth.user). Дахин холбоход status='active' болно. */
+  function saveGmailTokens(userId, { refreshToken = null, scope = '', email = null } = {}) {
+    _saveGmailTokens.run({
+      user_id: userId,
+      gmail_refresh_token: refreshToken ? encTok(refreshToken) : null,
+      gmail_scope: String(scope || ''),
+      gmail_email: email ? String(email).toLowerCase().trim() : null,
+    });
+    return getGmailInfo(userId);
+  }
+
+  const _disconnectGmail = db.prepare(
+    `UPDATE google_tokens SET gmail_refresh_token=NULL, gmail_scope='', gmail_email=NULL, gmail_connected=0, gmail_status='', updated_at=datetime('now') WHERE user_id=?`
+  );
+  function disconnectGmail(userId) {
+    _disconnectGmail.run(userId);
+  }
+
+  const _setGmailStatus = db.prepare(
+    `UPDATE google_tokens SET gmail_status=?, updated_at=datetime('now') WHERE user_id=?`
+  );
+  /** Listener/API-аас Gmail холболтын төлөв солих ('active' | 'reauth_needed'). */
+  function setGmailStatus(userId, status) {
+    _setGmailStatus.run(String(status || ''), userId);
+  }
+
+  /** Gmail холболтын төлөв — token утга ОРОХГҮЙ (API /me-д аюулгүй). */
+  function getGmailInfo(userId) {
+    const row = db.prepare('SELECT gmail_connected, gmail_status, gmail_email FROM google_tokens WHERE user_id = ?').get(userId);
+    return {
+      connected: Boolean(row && row.gmail_connected),
+      status: row ? String(row.gmail_status || '') : '',
+      email: row ? (row.gmail_email || null) : null,
+    };
+  }
+
+  // ===================== TELEGRAM ХОЛБОЛТ (per-user, multi-tenant bot) =====================
+  const CODE_TTL_MIN = 10;
+  function _genCode() {
+    // 6 оронтой тоон код (000000-999999-ийг '0'-ээр pad хийж 6 оронтой байлгана)
+    return String(Math.floor(Math.random() * 1_000_000)).padStart(6, '0');
+  }
+  const _deleteUnusedCodes = db.prepare('DELETE FROM telegram_link_codes WHERE user_id=? AND used=0');
+  const _insertCode = db.prepare(
+    `INSERT INTO telegram_link_codes (code, user_id, expires_at) VALUES (?, ?, datetime('now', ?))`
+  );
+
+  /** Хэрэглэгчийн linking код үүсгэх (10 мин TTL). Хуучин ашиглаагүй кодыг цэвэрлэнэ. */
+  function createTelegramLinkCode(userId) {
+    _deleteUnusedCodes.run(userId);
+    let code;
+    // Практикт мөргөлдөх магадлал бага ч PK давхцлаас найдвартай ангижрах (5 оролдлого).
+    for (let i = 0; i < 5; i++) {
+      code = _genCode();
+      try {
+        _insertCode.run(code, userId, `+${CODE_TTL_MIN} minutes`);
+        break;
+      } catch (e) {
+        if (i === 4) throw e;
+        code = null;
+      }
+    }
+    const row = db.prepare('SELECT code, expires_at FROM telegram_link_codes WHERE code=?').get(code);
+    return { code: row.code, expiresAt: row.expires_at };
+  }
+
+  function getTelegramLink(userId) {
+    const row = db.prepare('SELECT chat_id, linked_at FROM telegram_links WHERE user_id=?').get(userId);
+    return row ? { chatId: row.chat_id, linkedAt: row.linked_at } : null;
+  }
+
+  function disconnectTelegram(userId) {
+    db.prepare('DELETE FROM telegram_links WHERE user_id=?').run(userId);
   }
 
   function close() { try { db.close(); } catch { /* ignore */ } }
@@ -622,7 +791,11 @@ export function createDb(dbPath, opts = {}) {
     // settings + personal events (төсөв)
     getSettings, saveSettings, listEvents, addEvent, deleteEvent,
     // google auth
-    getUserByGoogleSub, upsertGoogleUser, saveGoogleTokens, getGoogleTokens,
+    getUserByGoogleSub, upsertGoogleUser, saveGoogleTokens, getGoogleTokens, disconnectGoogleCalendar,
+    // gmail холболт (multi-tenant listener)
+    saveGmailTokens, disconnectGmail, setGmailStatus, getGmailInfo,
+    // telegram холболт (multi-tenant bot)
+    createTelegramLinkCode, getTelegramLink, disconnectTelegram,
     migrate, close, _raw: db,
   };
 }

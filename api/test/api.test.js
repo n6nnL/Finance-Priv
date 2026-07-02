@@ -47,7 +47,8 @@ function post(body, headers = {}) {
   return fetch(`${baseUrl}/api/transactions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-API-Key': API_KEY, ...headers },
-    body: typeof body === 'string' ? body : JSON.stringify(body),
+    // Machine push-д userId ЗААВАЛ (multi-tenant) — тестүүд owner-ийн нэрээр илгээнэ.
+    body: typeof body === 'string' ? body : JSON.stringify({ userId: OWNER, ...body }),
   });
 }
 
@@ -162,7 +163,7 @@ test('HMAC: зөв гарын үсэг → 201, буруу → 401', async () =>
     const s = app2.listen(0, () => resolve(s));
   });
   const url = `http://127.0.0.1:${srv2.address().port}/api/transactions`;
-  const body = JSON.stringify({ ...validTx, messageId: '<msg-hmac>' });
+  const body = JSON.stringify({ ...validTx, userId: 1, messageId: '<msg-hmac>' });
 
   // Зөв гарын үсэг
   const goodSig = createHmac('sha256', HMAC).update(body).digest('hex');
@@ -181,7 +182,7 @@ test('HMAC: зөв гарын үсэг → 201, буруу → 401', async () =>
       'X-API-Key': API_KEY,
       'X-Signature': 'deadbeef',
       },
-    body: JSON.stringify({ ...validTx, messageId: '<msg-hmac-2>' }),
+    body: JSON.stringify({ ...validTx, userId: 1, messageId: '<msg-hmac-2>' }),
   });
   assert.equal(badRes.status, 401);
 

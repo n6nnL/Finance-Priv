@@ -34,15 +34,23 @@ function num(name, fallback) {
 
 export const config = {
   gmail: {
-    user: required('GMAIL_USER'),
+    // Legacy: зөвхөн owner-ийн анхны seed-д (accounts.js seedOwnerFromEnv).
+    // Multi-tenant үед данс бүрийн email нь API DB-ийн google_tokens.gmail_email-ээс ирнэ.
+    user: optional('GMAIL_USER', ''),
     mailbox: optional('IMAP_MAILBOX', 'INBOX'),
   },
   oauth: {
     clientId: required('GOOGLE_CLIENT_ID'),
     clientSecret: required('GOOGLE_CLIENT_SECRET'),
-    refreshToken: required('GMAIL_REFRESH_TOKEN'),
+    // Legacy: зөвхөн owner seed-д. Шинэ хэрэглэгчид dashboard-оос холбоно.
+    refreshToken: optional('GMAIL_REFRESH_TOKEN', ''),
     redirectUri: optional('OAUTH_REDIRECT_URI', 'http://localhost:53682/oauth2callback'),
   },
+  // Multi-tenant: API-ийн DB (google_tokens/users) — listener эндээс холбогдсон
+  // дансуудыг уншина. Token-ууд шифрлэгдсэн тул TOKEN_ENC_KEY (api/.env-тэй ИЖИЛ) заавал.
+  apiDbPath: required('API_DB_PATH'),
+  tokenEncKey: required('TOKEN_ENC_KEY'),
+  accountsPollSeconds: num('ACCOUNTS_POLL_SECONDS', 60),
   // Банкны илгээгчийн хаяг — env-ээс, default нь Голомт
   bankSender: optional('BANK_SENDER', 'alert@golomtbank.com').toLowerCase(),
   website: {

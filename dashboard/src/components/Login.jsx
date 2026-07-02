@@ -43,7 +43,7 @@ export default function Login() {
 
           <h1 style={{ fontFamily: 'Rubik', fontWeight: 600, fontSize: 30, lineHeight: 1.2, letterSpacing: '-.6px', margin: '0 0 8px' }}>Тавтай морил</h1>
           <p style={{ margin: '0 0 32px', color: '#8C8578', fontSize: 15, lineHeight: 1.5 }}>
-            Google хаягаараа нэвтэрнэ үү. Календарь хэсэгт ашиглахын тулд Google Calendar-ын (унших) зөвшөөрөл хүсэх болно.
+            Google хаягаараа нэвтэрнэ үү.
           </p>
 
           {err && (

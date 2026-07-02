@@ -38,7 +38,13 @@ export default function App() {
   // Google callback-аас буцаж ирвэл fragment-аас токен задлаад authed болгоно.
   const [authed, setAuthed] = useState(() => { consumeAuthFragment(); return isAuthed(); });
   const [user, setUser] = useState(null);
-  const [section, setSection] = useState('txn');
+  // Calendar/Gmail-холболтын callback-аас буцахад (?settings=1 / ?calendarError=1 /
+  // ?gmailError=1) шууд Календарь таб руу шилжинэ — Calendar.jsx Settings панелийг нээнэ.
+  const [section, setSection] = useState(() => {
+    const p = new URLSearchParams(window.location.search);
+    return (p.get('settings') === '1' || p.get('calendarError') === '1' || p.get('gmailError') === '1')
+      ? 'calendar' : 'txn';
+  });
 
   const [categories, setCategories] = useState([]);
   const [filters, setFilters] = useState(emptyFilters);
@@ -192,6 +198,20 @@ export default function App() {
 
           {section === 'txn' && (
             <>
+              {/* Gmail холбоогүй + гүйлгээгүй хэрэглэгчид onboarding empty-state */}
+              {user && user.gmailConnected === false && list.total === 0 && !loading && (
+                <div style={{ background: '#FFFDF7', border: '1.5px dashed #E3DACB', borderRadius: 14, padding: '28px 24px', marginBottom: 16, textAlign: 'center' }}>
+                  <div style={{ fontSize: 34, marginBottom: 10 }}>📬</div>
+                  <div style={{ fontFamily: 'Rubik', fontWeight: 600, fontSize: 17, marginBottom: 6 }}>Банкны Gmail-аа холбоно уу</div>
+                  <p style={{ margin: '0 0 16px', color: '#8C8578', fontSize: 14, lineHeight: 1.5 }}>
+                    Банкны мэдэгдэл ирдэг Gmail-аа холбоход гүйлгээ автоматаар энд бүртгэгдэнэ.
+                  </p>
+                  <button onClick={() => setSection('calendar')}
+                    style={{ height: 42, padding: '0 20px', border: 'none', background: '#1F7A6B', color: '#fff', fontFamily: 'Onest', fontWeight: 600, fontSize: 14, borderRadius: 10, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                    Тохиргоо руу очих
+                  </button>
+                </div>
+              )}
               <Summary summary={summary} />
               <PendingReview items={pending.data} total={pending.total} categories={categories} onConfirmed={onConfirmed} />
               <Filters categories={categories} value={filters} onChange={setFilters} onReset={() => setFilters(emptyFilters)} />

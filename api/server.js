@@ -16,7 +16,7 @@ const seed = config.auth.seedPassword
   ? { email: config.auth.seedEmail, passwordHash: hashPasswordSync(config.auth.seedPassword), role: 'admin' }
   : undefined;
 
-const db = createDb(config.dbPath, { seed });
+const db = createDb(config.dbPath, { seed, tokenEncKey: config.tokenEncKey });
 const ai = createAi({ apiKey: config.ai.apiKey, model: config.ai.model, enabled: config.ai.enabled });
 
 const app = createApp({
@@ -32,9 +32,11 @@ const app = createApp({
   allowRegister: config.auth.allowRegister,
   localAuth: config.auth.localAuth,
   google: {
-    clientId: config.google.clientId,
-    clientSecret: config.google.clientSecret,
-    redirectUri: config.google.redirectUri,
+    login: config.google.login,
+    calendarRedirectUri: config.google.calendarRedirectUri,
+    gmail: config.google.gmail,
+    gmailRedirectUri: config.google.gmailRedirectUri,
+    openSignup: config.auth.openSignup,
     allowedEmails: config.google.allowedEmails,
     dashboardBaseUrl: config.google.dashboardBaseUrl,
   },

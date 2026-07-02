@@ -6,11 +6,15 @@
 
 ## Архитектур (товч)
 
-Нэг repo, 3 pm2 процесс ([`../ecosystem.config.cjs`](../ecosystem.config.cjs)):
+Нэг repo, 4 pm2 процесс ([`../ecosystem.config.cjs`](../ecosystem.config.cjs)):
 
-- **bank-listener** (`src/index.js`, cwd=repo root) — Gmail IMAP IDLE listener → parse → categorize → API руу POST.
+- **bank-listener** (`src/index.js`, cwd=repo root) — multi-tenant Gmail IMAP IDLE listener
+  (хэрэглэгч бүрийн inbox тусад нь, `src/accounts.js`+`src/manager.js`) → parse → categorize →
+  API руу POST (`userId`-тэй).
 - **bank-api** (`api/server.js`, cwd=`api/`) — Express API. **`dashboard/dist`-г static-аар serve хийдэг** тул фронт+бэк нэг origin (`:3000`).
-- **bank-discord** (`discord/bot.js`, cwd=`discord/`) — Discord мэдэгдэл/ангилал bot.
+- **bank-discord** (`discord/bot.js`, cwd=`discord/`) — Discord мэдэгдэл/ангилал bot, **зөвхөн owner**.
+- **bank-telegram** (`telegram/bot.js`, cwd=`telegram/`) — Telegram мэдэгдэл/ангилал/linking bot,
+  **бүх хэрэглэгч** (multi-tenant).
 
 Гаднаас: **Nginx** (`:80/:443`, Let's Encrypt HTTPS) → `proxy_pass http://127.0.0.1:3000`. Домейн DuckDNS. Node **24** (node:sqlite-д 22.5+ ЗААВАЛ). Нууц утга серверийн **өөрийн** `.env` (root `./.env` + `api/.env`)-д — repo-д ОРОХГҮЙ.
 
@@ -52,6 +56,8 @@ ssh -i "$DEPLOY_SSH_KEY" "$DEPLOY_USER@$DEPLOY_HOST" \
    npm install --omit=dev && \
    (cd api && npm install --omit=dev) && \
    (cd dashboard && npm install && npm run build) && \
+   (cd discord && npm install --omit=dev) && \
+   (cd telegram && npm install --omit=dev) && \
    pm2 reload all"
 ```
 
@@ -91,11 +97,24 @@ ssh -i "$DEPLOY_SSH_KEY" "$DEPLOY_USER@$DEPLOY_HOST" \
 - **Node хувилбар:** 22.5+ ЗААВАЛ (node:sqlite). Сервер дээр Node 24.
 - **Хоёр API key таарах ёстой:** root `./.env`-ийн `WEBSITE_API_KEY` ↔ `api/.env`-ийн
   `LISTENER_API_KEY`. Таарахгүй бол dashboard/listener 401.
-- **OAuth refresh token** root `./.env`-ийн `GMAIL_REFRESH_TOKEN`-д. Google түүнийг
-  цуцалбал listener `invalid_grant`-аар reconnect loop-д орно → `node scripts/get-token.js`-ээр
-  шинэчилж `.env`-д тавиад `pm2 restart bank-listener`.
-- **Discord/listener restart нь `pm2 reload all`-д багтана**, гэхдээ зөвхөн UI өөрчлөлтөд
-  тэдгээрийг restart хийх шаардлагагүй.
+- **OAuth refresh token** root `./.env`-ийн `GMAIL_REFRESH_TOKEN`-д (legacy — зөвхөн owner-ийн
+  анхны seed-д; шинэ хэрэглэгч бүр dashboard-аас өөрийн Gmail-аа холбодог). Google түүнийг
+  цуцалбал listener `invalid_grant`-аар тухайн хэрэглэгчийг `reauth_needed` болгож зогсооно
+  (бусад хэрэглэгчид нөлөөгүй) → dashboard-ийн Settings-ээс дахин холбоно (эсвэл owner бол
+  `node scripts/get-token.js`-ээр шинэчилж `.env`-д тавиад `pm2 restart bank-listener`).
+- **`TOKEN_ENC_KEY` (root `.env` БА `api/.env`, ЯГ ИЖИЛ утга) — ЗААВАЛ.** Gmail/Calendar refresh
+  token-ыг DB-д шифрлэхэд ашиглана. Байхгүй бол `bank-api` асахгүй. Үүсгэх:
+  `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`. **Дараа нь сольж
+  БОЛОХГҮЙ** (хадгалагдсан token тайлагдахаа болино).
+- **`JWT_SECRET` (root `.env` БА `api/.env`, ЯГ ИЖИЛ утга) — ЗААВАЛ.** `bank-telegram` энэ секретээр
+  хэрэглэгчийн нэрийн өмнөөс богино хугацаат access token mint хийдэг. Таарахгүй бол Telegram
+  дээрх ангиллын товч бүгд алдаатай болно (`bank-api` лог дээр 401 харагдана).
+- **`TELEGRAM_BOT_TOKEN` (root `.env`)** — @BotFather-аас. `bank-telegram` эхлэхдээ шалгана,
+  дутуу бол process шууд унтрана (pm2 restart loop).
+- **Discord/Telegram/listener restart нь `pm2 reload all`-д багтана**, гэхдээ зөвхөн UI
+  өөрчлөлтөд тэдгээрийг restart хийх шаардлагагүй.
+- **API + listener-ийг ХАМТ deploy хий** — шинэ API (`userId` заавал ingest-д) хуучин listener-ийн
+  (userId-гүй) push-ийг 400-аар reject хийнэ.
 
 ## Анхны суулгац / гаднаас нэвтрэх
 
