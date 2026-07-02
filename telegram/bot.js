@@ -265,7 +265,11 @@ if (st0 && Number.isInteger(st0.lastNotifiedId)) {
   log('info', `Анхны асаалт — backlog алгасч, id>${lastNotifiedId}-ээс эхэлнэ`);
 }
 
-bot.launch().then(() => log('info', 'Telegram bot эхэллээ'));
+log('info', 'launch() дуудаж байна…');
+bot.launch()
+  .then(() => log('info', 'Telegram bot эхэллээ'))
+  .catch((e) => log('error', 'launch() алдаа', e?.message ?? String(e)));
+setInterval(() => log('info', `heartbeat, polling=${!!bot.polling}`), 10_000);
 setInterval(pollOnce, config.pollSeconds * 1000);
 
 function shutdown(signal) {
