@@ -265,11 +265,20 @@ if (st0 && Number.isInteger(st0.lastNotifiedId)) {
   log('info', `Анхны асаалт — backlog алгасч, id>${lastNotifiedId}-ээс эхэлнэ`);
 }
 
-log('info', 'launch() дуудаж байна…');
-bot.launch()
-  .then(() => log('info', 'Telegram bot эхэллээ'))
-  .catch((e) => log('error', 'launch() алдаа', e?.message ?? String(e)));
-setInterval(() => log('info', `heartbeat, polling=${!!bot.polling}`), 10_000);
+// ⚠️ bot.launch()-ийн буцаах Promise нь bot зогсох хүртэл RESOLVE ХИЙХГҮЙ
+// (telegraf-ийн long-polling Polling.loop() бол зогсох хүртэл гүйдэг async
+// generator тул) — "амжилттай эхэллээ" гэдгийг ЭНД мэдэхийн тулд бид
+// bot.polling шинжийг богино зайнаас шалгана. .catch() нь ГАГЦХАН getMe/
+// deleteWebhook шатанд (эсвэл 401/409 зэрэг retry-гүй алдаанд) л буудаг.
+bot.launch().catch((e) => log('error', 'launch() зогссон/алдаатай', e?.message ?? String(e)));
+let loggedStarted = false;
+const startedCheck = setInterval(() => {
+  if (bot.polling && !loggedStarted) {
+    loggedStarted = true;
+    log('info', 'Telegram bot эхэллээ (long polling)');
+    clearInterval(startedCheck);
+  }
+}, 500);
 setInterval(pollOnce, config.pollSeconds * 1000);
 
 function shutdown(signal) {
