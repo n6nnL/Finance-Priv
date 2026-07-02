@@ -10,12 +10,7 @@
 //    эхний check байдлаар бичигдсэн, requireLinked() бүх handler-т).
 // ============================================================
 
-import { setDefaultResultOrder } from 'node:dns';
-// Зарим сервер (жишээ: AWS EC2) IPv6 DNS record буцаадаг ч бодит IPv6 route
-// байхгүй тул node-fetch (telegraf дотоод) api.telegram.org руу ETIMEDOUT
-// алддаг. IPv4-ийг эхэнд тавьж энэ асуудлыг засна (Node 17+).
-setDefaultResultOrder('ipv4first');
-
+import { Agent as HttpsAgent } from 'node:https';
 import { Telegraf, Markup } from 'telegraf';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { config } from './config.js';
@@ -30,7 +25,14 @@ function log(level, msg, extra) {
 }
 
 const store = createTelegramStore({ dbPath: config.dbPath });
-const bot = new Telegraf(config.botToken);
+// ⚠️ Зарим сервер (жишээ: AWS EC2) api.telegram.org-д AAAA (IPv6) DNS record
+// буцаадаг ч бодит IPv6 route байхгүй тул анхны (family авто сонгодог) агент
+// ETIMEDOUT алддаг (dns.setDefaultResultOrder ганцаараа шийдэхгүй байсныг
+// туршилтаар баталгаажуулсан — Node 24-ийн Happy Eyeballs-тай холбоотой).
+// IPv4-г шууд тулгаж энэ асуудлыг бүрмөсөн засна.
+const bot = new Telegraf(config.botToken, {
+  telegram: { agent: new HttpsAgent({ family: 4, keepAlive: true, keepAliveMsecs: 10000 }) },
+});
 
 // --- pending follow-up асуулт (POS газар / шилжүүлгийн шалтгаан) ---
 // chatId → { txnId, catIdx, isPos, chatId, messageId }
