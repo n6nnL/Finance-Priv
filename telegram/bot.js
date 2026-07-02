@@ -10,6 +10,12 @@
 //    эхний check байдлаар бичигдсэн, requireLinked() бүх handler-т).
 // ============================================================
 
+import { setDefaultResultOrder } from 'node:dns';
+// Зарим сервер (жишээ: AWS EC2) IPv6 DNS record буцаадаг ч бодит IPv6 route
+// байхгүй тул node-fetch (telegraf дотоод) api.telegram.org руу ETIMEDOUT
+// алддаг. IPv4-ийг эхэнд тавьж энэ асуудлыг засна (Node 17+).
+setDefaultResultOrder('ipv4first');
+
 import { Telegraf, Markup } from 'telegraf';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { config } from './config.js';
