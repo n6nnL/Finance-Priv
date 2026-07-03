@@ -129,6 +129,10 @@ export function createAuthRouter({
       }
       // info.email = холбогдсон inbox-ийн бодит хаяг (login email-ээс өөр байж болно)
       db.saveGmailTokens(state.sub, { refreshToken: info.refreshToken, scope: info.scope, email: info.email });
+      // Owner admin observability: хэн нэгэн Gmail холбох бүрд OPS_WEBHOOK_URL-д мэдэгдэл
+      // (зөвхөн owner харна, тохируулаагүй бол no-op).
+      const loginUser = db.getUserById(state.sub);
+      notifyOps('gmail-connected', new Error(`Gmail холбогдлоо: ${loginUser?.email ?? state.sub} (inbox: ${info.email})`)).catch(() => {});
       return res.redirect(`${base}/?settings=1`);
     } catch (err) {
       logger.error('Gmail callback алдаа', { err: err?.message });
