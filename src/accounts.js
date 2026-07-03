@@ -23,22 +23,27 @@ export function createAccountsStore({ apiDbPath, tokenEncKey }) {
   db.exec('PRAGMA busy_timeout = 5000');
   db.exec('PRAGMA journal_mode = WAL');
 
-  function hasGmailColumns() {
+  function hasColumn(name) {
     try {
-      return db.prepare('PRAGMA table_info(google_tokens)').all().some((c) => c.name === 'gmail_refresh_token');
+      return db.prepare('PRAGMA table_info(google_tokens)').all().some((c) => c.name === name);
     } catch {
       return false;
     }
   }
+  const hasGmailColumns = () => hasColumn('gmail_refresh_token');
 
   /**
    * Идэвхтэй (холбогдсон, reauth шаардаагүй) дансууд.
-   * @returns {{ userId: number, email: string, refreshToken: string }[]}
+   * oauthClient: token-ыг олгосон OAuth client ('desktop' | 'web') — listener
+   * refresh хийхдээ ЯГ тэр client-ийг ашиглах ёстой (migration 011).
+   * @returns {{ userId: number, email: string, refreshToken: string, oauthClient: string }[]}
    */
   function listActiveAccounts() {
     if (!hasGmailColumns()) return [];
+    const withClient = hasColumn('gmail_oauth_client');
     const rows = db.prepare(`
       SELECT g.user_id, g.gmail_refresh_token, g.gmail_email, u.email AS user_email
+             ${withClient ? ', g.gmail_oauth_client' : ''}
       FROM google_tokens g JOIN users u ON u.id = g.user_id
       WHERE g.gmail_connected = 1 AND g.gmail_status = 'active'
             AND g.gmail_refresh_token IS NOT NULL`).all();
@@ -49,6 +54,7 @@ export function createAccountsStore({ apiDbPath, tokenEncKey }) {
           userId: Number(r.user_id),
           email: r.gmail_email || r.user_email,
           refreshToken: decryptToken(r.gmail_refresh_token, tokenEncKey),
+          oauthClient: r.gmail_oauth_client || 'desktop',
         });
       } catch {
         // Тайлагдахгүй token (key зөрсөн г.м) — тухайн дансыг алгасна,

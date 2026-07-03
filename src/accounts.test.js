@@ -53,6 +53,7 @@ test('listActiveAccounts: decrypt зөв, зөвхөн active данс', () => {
   assert.equal(accounts[0].userId, 1);
   assert.equal(accounts[0].email, 'inbox@gmail.com');
   assert.equal(accounts[0].refreshToken, 'legacy-refresh-token'); // тайлагдсан
+  assert.equal(accounts[0].oauthClient, 'desktop'); // legacy seed → desktop client
 
   // B хэрэглэгч Gmail холбоно (API-ийн saveGmailTokens загвараар)
   apiDb.saveGmailTokens(2, { refreshToken: 'b-refresh', scope: 'https://mail.google.com/', email: 'b-inbox@gmail.com' });
@@ -61,6 +62,7 @@ test('listActiveAccounts: decrypt зөв, зөвхөн active данс', () => {
   const b = two.find((a) => a.userId === 2);
   assert.equal(b.refreshToken, 'b-refresh');
   assert.equal(b.email, 'b-inbox@gmail.com');
+  assert.equal(b.oauthClient, 'web'); // Settings-ээс холбосон → web client (unauthorized_client incident)
 });
 
 test('markReauthNeeded: тухайн данс жагсаалтаас гарна, БУСАД хэвээр (fault isolation)', () => {

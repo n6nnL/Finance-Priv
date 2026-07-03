@@ -204,6 +204,10 @@ async function main() {
       userId: acc.userId,
       email: acc.email,
       refreshToken: acc.refreshToken,
+      // token-ыг олгосон яг тэр client-ээр л сэргээх ёстой (Google
+      // 'unauthorized_client' өгдөг эс тэгвэл) — migration 011, accounts.js.
+      clientId: acc.oauthClient === 'web' ? config.oauth.webClientId : config.oauth.clientId,
+      clientSecret: acc.oauthClient === 'web' ? config.oauth.webClientSecret : config.oauth.clientSecret,
       onMessage: (parsed, uid) => processEmail(acc, parsed, uid),
       onAuthError: () => {
         // invalid_grant → энэ хэрэглэгч дахин холбох шаардлагатай; бусад үргэлжилнэ

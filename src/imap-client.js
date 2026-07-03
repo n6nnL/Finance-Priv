@@ -37,11 +37,13 @@ export class ImapListener {
    *   userId: number,
    *   email: string,                — IMAP auth.user (холбогдсон Gmail хаяг)
    *   refreshToken: string,
+   *   clientId?: string,             — token-ыг олгосон OAuth client (өгөгдөөгүй бол
+   *   clientSecret?: string,           config.oauth.clientId/clientSecret, desktop legacy)
    *   onMessage: (email: object, uid: number) => Promise<void>,
    *   onAuthError?: () => void      — invalid_grant үед (reauth_needed тэмдэглэх)
    * }} opts
    */
-  constructor({ userId, email, refreshToken, onMessage, onAuthError = null }) {
+  constructor({ userId, email, refreshToken, clientId, clientSecret, onMessage, onAuthError = null }) {
     this.userId = userId;
     this.email = email;
     this.refreshToken = refreshToken;
@@ -49,8 +51,8 @@ export class ImapListener {
     this.onAuthError = onAuthError;
     this.client = null;
     this.oauthClient = new OAuth2Client(
-      config.oauth.clientId,
-      config.oauth.clientSecret,
+      clientId || config.oauth.clientId,
+      clientSecret || config.oauth.clientSecret,
       config.oauth.redirectUri
     );
     this.oauthClient.setCredentials({ refresh_token: refreshToken });

@@ -40,8 +40,15 @@ export const config = {
     mailbox: optional('IMAP_MAILBOX', 'INBOX'),
   },
   oauth: {
+    // 'desktop' client — зөвхөн owner-ийн legacy seed (scripts/get-token.js).
     clientId: required('GOOGLE_CLIENT_ID'),
     clientSecret: required('GOOGLE_CLIENT_SECRET'),
+    // 'web' client — dashboard Settings→Gmail холбох (api/.env-ийн
+    // GMAIL_GOOGLE_CLIENT_ID-тэй ИЖИЛ утга ЗААВАЛ). Google refresh_token-ыг
+    // зөвхөн олгосон яг тэр client-ээр л сэргээхийг зөвшөөрдөг тул listener
+    // token бүрийг эх client-ээр нь сэргээх ёстой (migration 011, index.js).
+    webClientId: optional('GMAIL_GOOGLE_CLIENT_ID', ''),
+    webClientSecret: optional('GMAIL_GOOGLE_CLIENT_SECRET', ''),
     // Legacy: зөвхөн owner seed-д. Шинэ хэрэглэгчид dashboard-оос холбоно.
     refreshToken: optional('GMAIL_REFRESH_TOKEN', ''),
     redirectUri: optional('OAUTH_REDIRECT_URI', 'http://localhost:53682/oauth2callback'),

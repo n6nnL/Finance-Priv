@@ -56,7 +56,8 @@ export function createManager({ listAccounts, createListener, logger }) {
     // 2) Шинэ данс асаах / өөрчлөгдсөн данс restart
     for (const acc of accounts) {
       const entry = running.get(acc.userId);
-      if (entry && entry.refreshToken === acc.refreshToken && entry.email === acc.email) continue;
+      if (entry && entry.refreshToken === acc.refreshToken && entry.email === acc.email
+          && entry.oauthClient === acc.oauthClient) continue;
       if (entry) await stopEntry(acc.userId, entry, 'token/email өөрчлөгдсөн — restart');
 
       const listener = createListener(acc);
@@ -66,7 +67,9 @@ export function createManager({ listAccounts, createListener, logger }) {
       const runPromise = listener.run().catch((err) => {
         logger.error({ userId: acc.userId, email: acc.email, err: err?.message }, 'Listener run() алдаа — зогслоо');
       });
-      running.set(acc.userId, { listener, refreshToken: acc.refreshToken, email: acc.email, runPromise });
+      running.set(acc.userId, {
+        listener, refreshToken: acc.refreshToken, email: acc.email, oauthClient: acc.oauthClient, runPromise,
+      });
     }
   }
 

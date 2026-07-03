@@ -261,6 +261,16 @@ export function createDb(dbPath, opts = {}) {
       message_id TEXT,
       sent_at TEXT NOT NULL DEFAULT (datetime('now')),
       PRIMARY KEY (transaction_id, chat_id))`);
+
+    // 011: GMAIL OAUTH CLIENT MARKER -----------------------------------------
+    // Listener refresh хийхдээ token-ыг олгосон ЯГ ТЭР OAuth client-г ашиглах
+    // ёстой (Google refresh_token-ыг өөр client-ээр сэргээхийг зөвшөөрдөггүй —
+    // 'unauthorized_client'). 'desktop' = legacy seed (root .env GOOGLE_CLIENT_ID,
+    // scripts/get-token.js). 'web' = dashboard Settings→Gmail холбох
+    // (GMAIL_GOOGLE_CLIENT_ID, saveGmailTokens-ээр үргэлж тавигдана).
+    if (!hasColumn('google_tokens', 'gmail_oauth_client')) {
+      db.exec(`ALTER TABLE google_tokens ADD COLUMN gmail_oauth_client TEXT NOT NULL DEFAULT 'desktop'`);
+    }
   }
   migrate();
 
@@ -688,15 +698,19 @@ export function createDb(dbPath, opts = {}) {
   }
 
   // ===================== GMAIL ХОЛБОЛТ (per-user, multi-tenant listener) =====================
+  // ЭНЭ функц зөвхөн Settings-ийн web Gmail-connect callback-аас дуудагддаг
+  // (routes/auth.js /gmail/callback) тул gmail_oauth_client үргэлж 'web'
+  // (listener token refresh хийхдээ зөв client сонгохын тулд, migration 011).
   const _saveGmailTokens = db.prepare(`INSERT INTO google_tokens
-      (user_id, gmail_refresh_token, gmail_scope, gmail_email, gmail_connected, gmail_status, updated_at)
-    VALUES (@user_id, @gmail_refresh_token, @gmail_scope, @gmail_email, 1, 'active', datetime('now'))
+      (user_id, gmail_refresh_token, gmail_scope, gmail_email, gmail_connected, gmail_status, gmail_oauth_client, updated_at)
+    VALUES (@user_id, @gmail_refresh_token, @gmail_scope, @gmail_email, 1, 'active', 'web', datetime('now'))
     ON CONFLICT(user_id) DO UPDATE SET
       gmail_refresh_token = COALESCE(excluded.gmail_refresh_token, google_tokens.gmail_refresh_token),
       gmail_scope = excluded.gmail_scope,
       gmail_email = COALESCE(excluded.gmail_email, google_tokens.gmail_email),
       gmail_connected = 1,
       gmail_status = 'active',
+      gmail_oauth_client = 'web',
       updated_at = excluded.updated_at`);
 
   /** Gmail refresh token хадгалах (шифрлэгдэнэ). email = холбогдсон inbox-ийн бодит
