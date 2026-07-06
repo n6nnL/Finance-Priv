@@ -68,6 +68,33 @@ test('PUT then GET settings round-trip (server-side хадгална)', async ()
   assert.deepEqual(settings.categoryAllocations, payload.categoryAllocations);
 });
 
+test('budgetFloor: default null, PUT/GET round-trip, тохируулаагүй бол null хэвээр', async () => {
+  const bHdr = await registerUser('bfloor@test.mn');
+  const g0 = await reqJson('/api/settings', 'GET', null, bHdr);
+  assert.equal((await g0.json()).settings.budgetFloor, null, 'budgetFloor default null байх ёстой');
+
+  const payload = {
+    salaryAmount: 1500000, budgetFloor: 200000, paydayDay: 15, usdMnt: 3578,
+    subscriptions: [], categoryAllocations: [],
+  };
+  const put = await reqJson('/api/settings', 'PUT', payload, bHdr);
+  assert.equal(put.status, 200);
+  assert.equal((await put.json()).settings.budgetFloor, 200000);
+
+  const get = await reqJson('/api/settings', 'GET', null, bHdr);
+  assert.equal((await get.json()).settings.budgetFloor, 200000, 'дахин ачаалахад хэвээр хадгалагдсан байх ёстой');
+
+  // budgetFloor-г дахин null болгож хадгалж болно (тохиргоогүй болгох)
+  const putNull = await reqJson('/api/settings', 'PUT', { ...payload, budgetFloor: null }, bHdr);
+  assert.equal((await putNull.json()).settings.budgetFloor, null);
+});
+
+test('budgetFloor: сөрөг утга → 400', async () => {
+  const bad = await reqJson('/api/settings', 'PUT',
+    { salaryAmount: 100, budgetFloor: -1, paydayDay: 15, usdMnt: 3578, subscriptions: [], categoryAllocations: [] }, OWNER_H);
+  assert.equal(bad.status, 400);
+});
+
 test('PUT settings validation: цалин сөрөг → 400; payday 0/29 → 400', async () => {
   const bad1 = await reqJson('/api/settings', 'PUT', { salaryAmount: -5, paydayDay: 15, usdMnt: 3578, subscriptions: [], categoryAllocations: [] }, OWNER_H);
   assert.equal(bad1.status, 400);

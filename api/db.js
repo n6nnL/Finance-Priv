@@ -49,6 +49,7 @@ export function normalizeMerchant(desc) {
  */
 export const DEFAULT_SETTINGS = {
   salaryAmount: null, // ЗААВАЛ оруулна — default үгүй
+  budgetFloor: null, // хамгаалах доод үлдэгдэл — салинтай адил default null (хуурамч тоо ХЭЗЭЭ Ч биш)
   paydayDay: 15,
   usdMnt: 3578,
   subscriptions: [
@@ -271,6 +272,13 @@ export function createDb(dbPath, opts = {}) {
     if (!hasColumn('google_tokens', 'gmail_oauth_client')) {
       db.exec(`ALTER TABLE google_tokens ADD COLUMN gmail_oauth_client TEXT NOT NULL DEFAULT 'desktop'`);
     }
+
+    // 012: ГҮЙЛГЭЭНИЙ ДАРААХ ҮЛДЭГДЭЛ (Үлдэгдэл) --------------------------------
+    // Nullable, DEFAULT NULL л — хуучин ~1057 гүйлгээг backfill ХИЙХГҮЙ (тусдаа
+    // ажил). Зөвхөн шинэ гүйлгээнд (listener balance parse хийсэн бол) бөглөгдөнө.
+    if (!hasColumn('transactions', 'account_balance')) {
+      db.exec('ALTER TABLE transactions ADD COLUMN account_balance REAL');
+    }
   }
   migrate();
 
@@ -299,10 +307,10 @@ export function createDb(dbPath, opts = {}) {
   const insertStmt = db.prepare(`
     INSERT OR IGNORE INTO transactions
       (user_id, message_id, amount, currency, txn_date, description, type, category,
-       account_last4, raw, status, ai_suggested_category, ai_confidence, is_pos)
+       account_last4, raw, status, ai_suggested_category, ai_confidence, is_pos, account_balance)
     VALUES
       (@user_id, @message_id, @amount, @currency, @txn_date, @description, @type, @category,
-       @account_last4, @raw, @status, @ai_suggested_category, @ai_confidence, @is_pos)`);
+       @account_last4, @raw, @status, @ai_suggested_category, @ai_confidence, @is_pos, @account_balance)`);
   const byIdStmt = db.prepare('SELECT * FROM transactions WHERE id = ? AND user_id = ?');
   const byMsgStmt = db.prepare('SELECT * FROM transactions WHERE message_id = ? AND user_id = ?');
 
@@ -323,6 +331,7 @@ export function createDb(dbPath, opts = {}) {
       ai_suggested_category: tx.aiSuggestedCategory ?? null,
       ai_confidence: tx.aiConfidence ?? null,
       is_pos: tx.isPos == null ? null : tx.isPos ? 1 : 0,
+      account_balance: tx.balance ?? null,
     };
     const res = insertStmt.run(row);
     if (res.changes > 0) {
@@ -338,6 +347,47 @@ export function createDb(dbPath, opts = {}) {
   }
   function getById(userId, id) {
     return byIdStmt.get(id, userId) ?? null;
+  }
+
+  // Хамгийн сүүлийн txn_date-той (INSERT/id дараалал БИШ) account_balance
+  // NOT NULL мөрийг сонгоно. txn_date тэнцүү бол id DESC (тухайн өдрийн
+  // сүүлд орсон нь илүү найдвартай) — давхардал/downtime-ийн дараах
+  // out-of-order insert-д зөв ажиллана.
+  const _balanceAnchor = db.prepare(`
+    SELECT txn_date, account_balance FROM transactions
+    WHERE user_id = ? AND account_balance IS NOT NULL
+    ORDER BY txn_date DESC, id DESC
+    LIMIT 1`);
+
+  /** Сүүлийн бодит (мэдэгдэж буй) үлдэгдлийн мөр — { date, balance } эсвэл null. */
+  function getBalanceAnchor(userId) {
+    const row = _balanceAnchor.get(userId);
+    return row ? { date: row.txn_date, balance: Number(row.account_balance) } : null;
+  }
+
+  /** Хэрэглэгчийн одоогийн үлдэгдэл (сүүлийн txn_date-тэй мөрөөс). Байхгүй бол null. */
+  function getCurrentBalance(userId) {
+    const anchor = getBalanceAnchor(userId);
+    return anchor ? anchor.balance : null;
+  }
+
+  const _dailyTxnStats = db.prepare(`
+    SELECT txn_date AS date,
+           COALESCE(SUM(CASE WHEN type='income' THEN amount ELSE -amount END), 0) AS net,
+           COUNT(*) AS cnt
+    FROM transactions
+    WHERE user_id = ? AND txn_date IS NOT NULL AND txn_date >= ? AND txn_date <= ?
+    GROUP BY txn_date`);
+
+  /**
+   * Өдөр тутмын цэвэр өөрчлөлт (орлого - зарлага; amount баганад ЗААВАЛ эерэг
+   * утга хадгалагддаг тул чиглэлийг type-аар шийднэ) + гүйлгээний тоо (READ-ONLY,
+   * balance-history сэргээлт болон gap илрүүлэлтэд ашиглагдана).
+   * @returns {{date:string, net:number, count:number}[]}
+   */
+  function getDailyTxnStats(userId, fromYmd, toYmd) {
+    return _dailyTxnStats.all(userId, fromYmd, toYmd)
+      .map((r) => ({ date: r.date, net: Number(r.net), count: Number(r.cnt) }));
   }
 
   /** Шүүлтийн WHERE — ҮРГЭЛЖ user_id-аар эхэлнэ (tenant isolation) */
@@ -795,7 +845,8 @@ export function createDb(dbPath, opts = {}) {
     // users / auth
     createUser, getUserByEmail, getUserById, countUsers, getOwnerUserId,
     // transactions
-    insertTransaction, getByMessageId, getById, listTransactions, getSummary,
+    insertTransaction, getByMessageId, getById, getCurrentBalance, getBalanceAnchor, getDailyTxnStats,
+    listTransactions, getSummary,
     getMonthly, getByCategory, getCycleSpend, getPending, updateCategoryById, updateCategoryByPattern, updateNote,
     autoClassifyStalePending,
     // real-time tracker: %-хуваарилалт

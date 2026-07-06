@@ -175,3 +175,19 @@ test('хоосон имэйл → amount null', () => {
   const tx = parseGolomt({ messageId: '<g5>', text: '', html: false });
   assert.equal(tx.amount, null);
 });
+
+test('Үлдэгдэл талбар байхгүй ч бусад талбар зөв бол throw хийхгүй, balance null', () => {
+  const t = [
+    'ЗАРЛАГЫН ГҮЙЛГЭЭ',
+    'Гүйлгээний дүн: -3,000.00MNT',
+    'Гүйлгээний огноо: 2026-06-09',
+    'Дансны дугаар: 116*****50',
+    'Гүйлгээний утга: TEST NO BALANCE',
+  ].join('\n');
+  assert.doesNotThrow(() => {
+    const tx = parseGolomt({ messageId: '<nobal>', text: t, html: false });
+    assert.equal(tx.amount, 3000);
+    assert.equal(tx.type, 'expense');
+    assert.equal(tx.balance, null);
+  });
+});

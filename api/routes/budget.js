@@ -33,6 +33,9 @@ const AllocationSchema = z.object({
 const SettingsSchema = z.object({
   // цалин: эерэг бүхэл тоо ЭСВЭЛ null (оруулаагүй). Default null.
   salaryAmount: z.number().int('salaryAmount бүхэл тоо').nonnegative('salaryAmount >= 0').nullable().default(null),
+  // budgetFloor: хамгаалах доод үлдэгдэл (₮) — салинтай адил DEFAULT null (заавал биш,
+  // тохируулаагүй бол UI хуурамч тоо ХАРУУЛАХГҮЙ).
+  budgetFloor: z.number().int('budgetFloor бүхэл тоо').nonnegative('budgetFloor >= 0').nullable().default(null),
   paydayDay: z.number().int().min(1).max(28).default(DEFAULT_SETTINGS.paydayDay),
   usdMnt: z.number().positive('usdMnt > 0').finite().default(DEFAULT_SETTINGS.usdMnt),
   subscriptions: z.array(SubscriptionSchema).max(50).default(DEFAULT_SETTINGS.subscriptions),

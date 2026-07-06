@@ -16,6 +16,7 @@ import { createManager } from './manager.js';
 import { parseGolomt } from './parsers/golomt.js';
 import { categorize } from './categorize.js';
 import { pushTransaction } from './push.js';
+import { trackBalanceParse } from './balanceAlert.js';
 import {
   isProcessed,
   insertTransaction,
@@ -86,6 +87,10 @@ async function processEmail(account, parsed, uid) {
   // 6) Ангилах (parser category-г null үлдээдэг тул энд онооно)
   const category = categorize(tx);
 
+  // 6.1) Үлдэгдэл (Үлдэгдэл) талбар тогтмол задрахгүй байвал (загвар өөрчлөгдсөн)
+  //      ops сэрэмжлүүлэг — balanceAlert.js-ийн дараалсан-miss threshold-оор.
+  trackBalanceParse(tx.balance != null);
+
   // 7) API payload бэлдэх — вэбсайтын API-ийн каноник гэрээтэй ИЖИЛ:
   //    messageId, amount, currency, date, description, type, category,
   //    accountLast4, raw + userId (multi-tenant: API талд ЗААВАЛ, owner fallback үгүй).
@@ -100,6 +105,7 @@ async function processEmail(account, parsed, uid) {
     category,
     accountLast4: tx.accountLast4,
     isPos: tx.isPos, // BOM дүрэм (POS гүйлгээ эсэх)
+    balance: tx.balance, // Үлдэгдэл (гүйлгээний дараах данс дахь дүн); parse амжилтгүй бол null
     raw: (tx.raw || subject || '').slice(0, 4000),
   };
 
