@@ -8,6 +8,7 @@ import {
 import Planner from './Planner.jsx';
 import Settings from './Settings.jsx';
 import BudgetTracker from './BudgetTracker.jsx';
+import BalanceHistory from './BalanceHistory.jsx';
 
 const TYPE = {
   income: { dot: '#2E9E5B', tint: 'rgba(46,158,91,0.12)', label: 'Цалин' },
@@ -165,6 +166,9 @@ export default function Calendar() {
 
       {/* Real-time tracker — тусдаа view (Planner-г хөндөхгүй) */}
       <BudgetTracker />
+
+      {/* Үлдэгдлийн график — өөр нэг ТУСДАА, НЭМЭЛТ view (BudgetTracker-г хөндөхгүй) */}
+      <BalanceHistory budgetFloor={settings.budgetFloor} onOpenSettings={() => setShowSettings(true)} />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-[18px] items-start">
         {/* ── Left: calendar ── */}

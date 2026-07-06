@@ -20,6 +20,7 @@ const numOr = (v, def) => { const n = Number(v); return Number.isFinite(n) ? n :
 function sanitize(d) {
   return {
     salaryAmount: intOrNull(d.salaryAmount),
+    budgetFloor: intOrNull(d.budgetFloor),
     paydayDay: Math.min(Math.max(intOr(d.paydayDay, 15), 1), 28),
     usdMnt: Math.max(1, numOr(d.usdMnt, 3578)),
     subscriptions: (d.subscriptions || [])
@@ -116,14 +117,21 @@ export default function Settings({ settings, onSave, onClose, saving }) {
         )}
       </div>
 
-      {/* Цалин / payday / ханш */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-[12px]">
+      {/* Цалин / хамгаалах доод үлдэгдэл / payday / ханш */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-[12px]">
         <div>
           <label className={labelCls}>Цалин (₮)</label>
           <input type="number" inputMode="numeric" className={inputCls}
             placeholder="Цалингаа оруулна уу"
             value={draft.salaryAmount ?? ''}
             onChange={(e) => set({ salaryAmount: e.target.value })} />
+        </div>
+        <div>
+          <label className={labelCls}>Хамгаалах доод үлдэгдэл (₮)</label>
+          <input type="number" inputMode="numeric" className={inputCls}
+            placeholder="ж: 200,000"
+            value={draft.budgetFloor ?? ''}
+            onChange={(e) => set({ budgetFloor: e.target.value })} />
         </div>
         <div>
           <label className={labelCls}>Цалингийн өдөр</label>

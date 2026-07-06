@@ -50,6 +50,7 @@ export default function App() {
   const [filters, setFilters] = useState(emptyFilters);
   const [list, setList] = useState({ data: [], total: 0, limit: PAGE, offset: 0 });
   const [summary, setSummary] = useState(null);
+  const [balance, setBalance] = useState(null); // GET /api/balance — бодит одоогийн үлдэгдэл (сарын cashflow БИШ)
   const [pending, setPending] = useState({ data: [], total: 0 });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -67,6 +68,13 @@ export default function App() {
     try {
       const s = await api.summary(thisMonthFilter());
       setSummary(s);
+    } catch (e) { handle401(e); }
+  }, []);
+
+  const loadBalance = useCallback(async () => {
+    try {
+      const b = await api.balance();
+      setBalance(b.balance);
     } catch (e) { handle401(e); }
   }, []);
 
@@ -88,7 +96,8 @@ export default function App() {
   useEffect(() => {
     if (!authed) return;
     loadSummary();
-  }, [authed, loadSummary]);
+    loadBalance();
+  }, [authed, loadSummary, loadBalance]);
 
   useEffect(() => {
     if (!authed || section !== 'txn') return;
@@ -212,7 +221,7 @@ export default function App() {
                   </button>
                 </div>
               )}
-              <Summary summary={summary} />
+              <Summary summary={summary} balance={balance} />
               <PendingReview items={pending.data} total={pending.total} categories={categories} onConfirmed={onConfirmed} />
               <Filters categories={categories} value={filters} onChange={setFilters} onReset={() => setFilters(emptyFilters)} />
               <TransactionTable
