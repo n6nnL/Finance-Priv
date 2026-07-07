@@ -161,6 +161,27 @@ test('HTML хүснэгтээс label→value уншина', () => {
   assert.equal(tx.accountLast4, '50');
 });
 
+// Регрессийн fixture — 2026-07-07-нд бодит incident-д ашигласан жинхэнэ имэйлийн
+// бичиглэл (id=1065). Тухайн үед balance NULL гарсан шалтгаан нь parser БИШ
+// (listener процесс хуучин код ажиллуулж байсан) байсан ч цаашид энэ яг форматыг
+// хамгаалахын тулд тогтмол fixture болгов.
+test('бодит incident-ийн имэйл (2026-07-07, орлого HER-БАТСАЙХАН ТӨ) → balance зөв задарна', () => {
+  const t = [
+    'ОРЛОГЫН ГҮЙЛГЭЭ',
+    'Гүйлгээний дүн:',
+    '+9,500.00 MNT',
+    'Гүйлгээний огноо: 2026-07-07',
+    'Дансны дугаар: 116*****50 Гүйлгээний утга: HER-БАТСАЙХАН ТӨ Үлдэгдэл: 12,301.98 MNT',
+  ].join('\n');
+  const tx = parseGolomt({ messageId: '<incident-20260707@golomtbank.com>', text: t, html: false });
+  assert.equal(tx.amount, 9500);
+  assert.equal(tx.type, 'income');
+  assert.equal(tx.date, '2026-07-07');
+  assert.equal(tx.accountLast4, '50');
+  assert.equal(tx.description, 'HER-БАТСАЙХАН ТӨ');
+  assert.equal(tx.balance, 12301.98);
+});
+
 test('гүйлгээ биш имэйл → amount null (index.js parse_failed гэж үзнэ)', () => {
   const tx = parseGolomt({
     messageId: '<g4>',
