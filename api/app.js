@@ -13,6 +13,7 @@ import { createRateLimit } from './middleware/rateLimit.js';
 import { createTransactionsRouter } from './routes/transactions.js';
 import { createMetaRouter } from './routes/meta.js';
 import { createBudgetRouter } from './routes/budget.js';
+import { createManualSavingsRouter } from './routes/manualSavings.js';
 import { createTelegramRouter } from './routes/telegram.js';
 import { createAuthRouter, createMeHandler, createCalendarConnectHandlers, createGmailConnectHandlers } from './routes/auth.js';
 import { createJwt } from './auth/jwt.js';
@@ -121,6 +122,7 @@ export function createApp(deps) {
   app.use('/api/transactions', rateLimitMw, authMw, createTransactionsRouter({ db, ai }));
   app.use('/api', rateLimitMw, authMw, createMetaRouter({ db, ai }));
   app.use('/api', rateLimitMw, authMw, createBudgetRouter({ db }));
+  app.use('/api/manual-savings', rateLimitMw, authMw, createManualSavingsRouter({ db }));
   app.use('/api/telegram', rateLimitMw, authMw, createTelegramRouter({ db }));
 
   // --- Production: баригдсан dashboard-г serve хийх (нэг origin → CORS хэрэггүй) ---

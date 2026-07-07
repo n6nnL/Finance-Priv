@@ -279,6 +279,25 @@ export function createDb(dbPath, opts = {}) {
     if (!hasColumn('transactions', 'account_balance')) {
       db.exec('ALTER TABLE transactions ADD COLUMN account_balance REAL');
     }
+
+    // 013: ГАР АРГААР УДИРДСАН ХӨРӨНГӨ (бэлэн мөнгө/EUR, listener харахгүй) --------
+    // ЭНЭ хүснэгт нь хэрэглэгчийн ШУУД бичдэг цорын ганц санхүүгийн хүснэгт —
+    // "transactions/category_overrides-д шууд бичихгүй" дүрэм ЭНД ХАМААРАХГҮЙ.
+    // amount ЗААВАЛ эерэг, чиглэл нь type ('deposit'|'withdrawal')-д (transactions-тэй
+    // ижил конвенц). amount_eur/exchange_rate — сонголттой, зөвхөн лавлагаа (balance-д
+    // нөлөөгүй, дахин тооцоолохгүй).
+    db.exec(`CREATE TABLE IF NOT EXISTS manual_ledger_entries (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id       INTEGER NOT NULL,
+      entry_date    TEXT NOT NULL,
+      type          TEXT NOT NULL CHECK (type IN ('deposit','withdrawal')),
+      amount        REAL NOT NULL,
+      amount_eur    REAL,
+      exchange_rate REAL,
+      note          TEXT,
+      created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at    TEXT NOT NULL DEFAULT (datetime('now')))`);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_manual_ledger_user ON manual_ledger_entries (user_id)');
   }
   migrate();
 
@@ -839,6 +858,72 @@ export function createDb(dbPath, opts = {}) {
     db.prepare('DELETE FROM telegram_links WHERE user_id=?').run(userId);
   }
 
+  // ===================== ГАР АРГААР УДИРДСАН ХӨРӨНГӨ (manual ledger, per-user) =====================
+  const _insertLedger = db.prepare(`
+    INSERT INTO manual_ledger_entries (user_id, entry_date, type, amount, amount_eur, exchange_rate, note, created_at, updated_at)
+    VALUES (@user_id, @entry_date, @type, @amount, @amount_eur, @exchange_rate, @note, datetime('now'), datetime('now'))`);
+  const _getLedgerEntry = db.prepare('SELECT * FROM manual_ledger_entries WHERE id=? AND user_id=?');
+  const _listLedger = db.prepare('SELECT * FROM manual_ledger_entries WHERE user_id=? ORDER BY entry_date DESC, id DESC');
+  const _updateLedger = db.prepare(`
+    UPDATE manual_ledger_entries
+    SET entry_date=@entry_date, type=@type, amount=@amount, amount_eur=@amount_eur,
+        exchange_rate=@exchange_rate, note=@note, updated_at=datetime('now')
+    WHERE id=@id AND user_id=@user_id`);
+  const _deleteLedger = db.prepare('DELETE FROM manual_ledger_entries WHERE id=? AND user_id=?');
+  const _ledgerBalance = db.prepare(`
+    SELECT COALESCE(SUM(CASE WHEN type='deposit' THEN amount ELSE -amount END), 0) AS balance
+    FROM manual_ledger_entries WHERE user_id=?`);
+
+  const _mapLedger = (r) => (r ? {
+    id: Number(r.id),
+    date: r.entry_date,
+    type: r.type,
+    amount: Number(r.amount),
+    amountEur: r.amount_eur == null ? null : Number(r.amount_eur),
+    exchangeRate: r.exchange_rate == null ? null : Number(r.exchange_rate),
+    note: r.note ?? null,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  } : null);
+
+  /** Balance = signed sum (deposit +, withdrawal -). */
+  function getManualLedgerBalance(userId) {
+    return Number(_ledgerBalance.get(userId).balance);
+  }
+
+  /** Жагсаалт (entry_date DESC) + balance нэг дор. */
+  function listManualLedger(userId) {
+    return { rows: _listLedger.all(userId).map(_mapLedger), balance: getManualLedgerBalance(userId) };
+  }
+
+  function addManualLedgerEntry(userId, e) {
+    const res = _insertLedger.run({
+      user_id: userId,
+      entry_date: e.date,
+      type: e.type,
+      amount: e.amount,
+      amount_eur: e.amountEur ?? null,
+      exchange_rate: e.exchangeRate ?? null,
+      note: e.note ?? null,
+    });
+    return _mapLedger(_getLedgerEntry.get(Number(res.lastInsertRowid), userId));
+  }
+
+  /** Hard update — soft-delete/audit шаардлагагүй (хувийн, low-stakes хэрэгсэл). */
+  function updateManualLedgerEntry(userId, id, e) {
+    const res = _updateLedger.run({
+      id, user_id: userId,
+      entry_date: e.date, type: e.type, amount: e.amount,
+      amount_eur: e.amountEur ?? null, exchange_rate: e.exchangeRate ?? null, note: e.note ?? null,
+    });
+    if (res.changes === 0) return null;
+    return _mapLedger(_getLedgerEntry.get(id, userId));
+  }
+
+  function deleteManualLedgerEntry(userId, id) {
+    return _deleteLedger.run(id, userId).changes;
+  }
+
   function close() { try { db.close(); } catch { /* ignore */ } }
 
   return {
@@ -861,6 +946,8 @@ export function createDb(dbPath, opts = {}) {
     saveGmailTokens, disconnectGmail, setGmailStatus, getGmailInfo,
     // telegram холболт (multi-tenant bot)
     createTelegramLinkCode, getTelegramLink, disconnectTelegram,
+    // гар аргаар удирдсан хөрөнгө (manual ledger)
+    listManualLedger, addManualLedgerEntry, updateManualLedgerEntry, deleteManualLedgerEntry, getManualLedgerBalance,
     migrate, close, _raw: db,
   };
 }

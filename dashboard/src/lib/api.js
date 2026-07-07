@@ -161,6 +161,11 @@ export const api = {
   events: () => req('/api/events'),
   addEvent: (e) => req('/api/events', { method: 'POST', body: e }),
   deleteEvent: (id) => req(`/api/events/${id}`, { method: 'DELETE' }),
+  // ---- Гар аргаар удирдсан хөрөнгө (бэлэн мөнгө/EUR) ----
+  manualSavings: () => req('/api/manual-savings'),
+  addManualSaving: (entry) => req('/api/manual-savings', { method: 'POST', body: entry }),
+  updateManualSaving: (id, entry) => req(`/api/manual-savings/${id}`, { method: 'PUT', body: entry }),
+  deleteManualSaving: (id) => req(`/api/manual-savings/${id}`, { method: 'DELETE' }),
   // ---- Real-time tracker ----
   budgetStatus: () => req('/api/budget-status?cycle=current'),
   budgetAllocations: () => req('/api/budget-allocations'),
