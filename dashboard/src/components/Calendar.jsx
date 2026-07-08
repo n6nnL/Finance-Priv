@@ -8,7 +8,6 @@ import {
 import Planner from './Planner.jsx';
 import Settings from './Settings.jsx';
 import BudgetTracker from './BudgetTracker.jsx';
-import BalanceHistory from './BalanceHistory.jsx';
 import ManualSavings from './ManualSavings.jsx';
 
 const TYPE = {
@@ -167,9 +166,6 @@ export default function Calendar() {
 
       {/* Real-time tracker — тусдаа view (Planner-г хөндөхгүй) */}
       <BudgetTracker />
-
-      {/* Үлдэгдлийн график — өөр нэг ТУСДАА, НЭМЭЛТ view (BudgetTracker-г хөндөхгүй) */}
-      <BalanceHistory budgetFloor={settings.budgetFloor} onOpenSettings={() => setShowSettings(true)} />
 
       {/* Гар аргаар удирдсан хөрөнгө — ТУСДАА, НЭМЭЛТ view (дээрхийг хөндөхгүй) */}
       <ManualSavings />

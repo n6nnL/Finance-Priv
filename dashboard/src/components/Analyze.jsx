@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api.js';
 import { money, catLabel, catEmoji, catHex } from '../lib/format.js';
-import SpendingHistory from './SpendingHistory.jsx';
+import BalanceHistory from './BalanceHistory.jsx';
 
 const PERIODS = [
   { id: 1, label: 'Энэ сар' },
@@ -32,6 +32,14 @@ export default function Analyze() {
   const [byCat, setByCat] = useState(null);
   const [catLoading, setCatLoading] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [budgetFloor, setBudgetFloor] = useState(undefined); // undefined = ачаалж байна, null = тохируулаагүй
+
+  // Хамгаалах доод хэмжээ — BalanceHistory-д (Тохиргоо Календарь дор байрладаг тул энд өөрөө уншина)
+  useEffect(() => {
+    let alive = true;
+    api.getSettings().then((r) => { if (alive) setBudgetFloor(r.settings.budgetFloor); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
 
   // Сарын тренд + сонгогчийн жагсаалт
   useEffect(() => {
@@ -209,8 +217,15 @@ export default function Analyze() {
         )}
       </div>
 
-      {/* Өдөр тутмын зарлагын түүх — ТУСДАА, НЭМЭЛТ карт (дээрхийг хөндөхгүй) */}
-      <SpendingHistory />
+      {/* Үлдэгдлийн график (тохиргоо-той холбоотой) — ТУСДАА, НЭМЭЛТ карт (дээрхийг хөндөхгүй) */}
+      {budgetFloor !== undefined ? (
+        <BalanceHistory
+          budgetFloor={budgetFloor}
+          onOpenSettings={() => { window.location.search = 'settings=1'; }}
+        />
+      ) : (
+        <div className={cardCls}><div className="text-[14px] text-[#8C8578]">Ачаалж байна…</div></div>
+      )}
     </div>
   );
 }

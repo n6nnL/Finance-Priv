@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api.js';
-import { money, dateLabel } from '../lib/format.js';
+import { money, dateLabel, catLabel, catEmoji, catHex, hexTint, displayDesc } from '../lib/format.js';
 
 // Үлдэгдлийн график (өдөр тутмын сэргээлт) — Бодит зарцуулалт (BudgetTracker)-аас
 // тусдаа, НЭМЭЛТ view. READ-ONLY (GET /api/balance-history). Эхлэл огноо тогтмол
@@ -33,11 +33,17 @@ const cardCls = 'bg-cream-card border border-cream-border rounded-card p-[18px] 
 export default function BalanceHistory({ budgetFloor, onOpenSettings }) {
   const [data, setData] = useState(null); // { available, series, gaps, anchor, from, to } | null (ачаалж байна)
   const [err, setErr] = useState('');
+  const [selected, setSelected] = useState(null); // сонгосон цэгийн YYYY-MM-DD (drill-down)
 
   useEffect(() => {
     let alive = true;
     api.balanceHistory(FROM)
-      .then((r) => { if (alive) setData(r); })
+      .then((r) => {
+        if (!alive) return;
+        setData(r);
+        // Анхдагч: хамгийн сүүлийн (өнөөдрийн) цэгийг сонгоно.
+        if (r.series && r.series.length) setSelected(r.series[r.series.length - 1].date);
+      })
       .catch((e) => { if (alive) setErr(e.message || 'Ачаалж чадсангүй'); });
     return () => { alive = false; };
   }, []);
@@ -92,6 +98,8 @@ export default function BalanceHistory({ budgetFloor, onOpenSettings }) {
   const points = buildPoints(series, domMin, domMax);
   const floorY = PAD_Y + (1 - (budgetFloor - domMin) / (domMax - domMin)) * (H - 2 * PAD_Y);
   const last = series[series.length - 1];
+  const selectedPoint = series.find((p) => p.date === selected) || null;
+  const selectedTxns = selectedPoint?.transactions || [];
 
   return (
     <div className={cardCls}>
@@ -145,6 +153,21 @@ export default function BalanceHistory({ budgetFloor, onOpenSettings }) {
                 opacity={gapSeg ? 0.55 : 1} strokeLinecap="round" />
             );
           })}
+
+          {/* Цэг бүр дээр дарж тухайн өдрийн гүйлгээг доор нь харуулна (drill-down) */}
+          {points.map((p) => {
+            const isSelected = p.date === selected;
+            const belowFloor = p.balance < budgetFloor;
+            return (
+              <g key={p.date} onClick={() => setSelected(p.date)} style={{ cursor: 'pointer' }}>
+                {/* Даралтын хамгаалалтын бүс — цэг жижиг ч хүрэлцэхэд амар */}
+                <circle cx={p.x} cy={p.y} r="9" fill="transparent" />
+                <circle cx={p.x} cy={p.y} r={isSelected ? 5 : 2.5}
+                  fill={belowFloor ? RED : TEAL}
+                  stroke={isSelected ? '#fff' : 'none'} strokeWidth={isSelected ? 2 : 0} />
+              </g>
+            );
+          })}
         </svg>
       </div>
 
@@ -166,6 +189,44 @@ export default function BalanceHistory({ budgetFloor, onOpenSettings }) {
               {dateLabel(g.start)} – {dateLabel(g.end)}: энэ хугацаанд ямар ч гүйлгээ бүртгэгдээгүй тул сэргээлт бага итгэлтэй.
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Сонгосон өдрийн drill-down жагсаалт — графикийн цэг дээр дарж сонгоно */}
+      {selectedPoint && (
+        <div className="pt-[14px] border-t border-cream-border flex flex-col gap-[12px]">
+          <div className="flex items-center justify-between flex-wrap gap-[8px]">
+            <div className="font-display font-semibold text-[15px] whitespace-nowrap">{dateLabel(selectedPoint.date)}</div>
+            <span className="font-display font-semibold text-[15px] whitespace-nowrap" style={{ color: selectedPoint.balance < budgetFloor ? RED : TEAL }}>
+              {money(selectedPoint.balance)}
+            </span>
+          </div>
+          {selectedTxns.length === 0 ? (
+            <div className="text-[13px] text-[#A39A8A]">Энэ өдөр гүйлгээ алга.</div>
+          ) : (
+            <div className="flex flex-col gap-[10px]">
+              {selectedTxns.map((t) => {
+                const hex = catHex(t.category);
+                const isIncome = t.type === 'income';
+                return (
+                  <div key={t.id} className="flex flex-col gap-[3px] sm:flex-row sm:items-center sm:gap-[10px]">
+                    <span className="flex items-center gap-[8px] min-w-0 sm:flex-1">
+                      <span className="w-[30px] h-[30px] shrink-0 rounded-[9px] flex items-center justify-center text-[15px]" style={{ background: hexTint(hex, 0.14) }}>
+                        {catEmoji(t.category)}
+                      </span>
+                      <span className="min-w-0 flex-1 truncate text-[14px] font-medium">{displayDesc(t)}</span>
+                    </span>
+                    <span className="text-[13px] font-semibold px-[8px] py-[2px] rounded-full whitespace-nowrap shrink-0" style={{ color: hex, background: hexTint(hex, 0.12) }}>
+                      {catLabel(t.category)}
+                    </span>
+                    <span className="font-display font-semibold text-[14px] whitespace-nowrap shrink-0 min-w-[84px] sm:text-right" style={{ color: isIncome ? '#2E9E5B' : '#D8483B' }}>
+                      {isIncome ? '+' : '−'}{money(t.amount)}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
     </div>

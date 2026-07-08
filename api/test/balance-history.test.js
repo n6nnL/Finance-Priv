@@ -171,6 +171,63 @@ test('gap илрүүлэлт: 3+ хоног гүйлгээгүй мөчийг ц
   assert.deepEqual(json.gaps[0], { start: d(-8), end: d(-4) });
 });
 
+// ---------------- Drill-down: цуврал цэг бүрт тухайн өдрийн гүйлгээ ----------------
+
+test('drill-down: нэг өдөрт олон гүйлгээ бол БҮГД тухайн цэгийн transactions-д орно', async () => {
+  const { auth, userId } = await registerUser('bh-drill-multi@example.com');
+  let mid = 0;
+  const tx = (over) => db.insertTransaction({
+    userId, messageId: `<bhdm${++mid}>`, amount: 1000, currency: 'MNT', type: 'expense', status: 'classified', ...over,
+  });
+  tx({ date: '2026-06-01', amount: 5000, description: 'Кофе', category: 'Хүнсний зүйл' });
+  tx({ date: '2026-06-01', amount: 3000, description: 'Талх', category: 'Хүнсний зүйл' });
+  tx({ date: '2026-06-02', amount: 20000, description: 'Такси', category: 'Тээвэр', balance: 50000 }); // anchor
+
+  const r = await getHistory(auth, '2026-06-01');
+  const json = await r.json();
+  const d1 = json.series.find((p) => p.date === '2026-06-01');
+  assert.equal(d1.transactions.length, 2, 'нэг өдрийн бүх гүйлгээ орсон байх ёстой');
+  assert.deepEqual(d1.transactions.map((t) => t.description).sort(), ['Кофе', 'Талх']);
+});
+
+test('drill-down: ангилаагүй (category NULL) гүйлгээ ХАСАГДАХГҮЙ', async () => {
+  const { auth, userId } = await registerUser('bh-drill-uncat@example.com');
+  let mid = 0;
+  db.insertTransaction({ userId, messageId: `<bhdu${++mid}>`, amount: 7000, currency: 'MNT', date: '2026-06-05', type: 'expense', description: '0930 UNKNOWNBOM', category: null, status: 'pending_review' });
+  db.insertTransaction({ userId, messageId: `<bhdu${++mid}>`, amount: 1000, currency: 'MNT', date: '2026-06-06', type: 'expense', status: 'classified', balance: 9000 }); // anchor
+
+  const r = await getHistory(auth, '2026-06-05');
+  const json = await r.json();
+  const d = json.series.find((p) => p.date === '2026-06-05');
+  assert.equal(d.transactions.length, 1, 'ангилаагүй мөр алдагдах ёсгүй');
+  assert.equal(d.transactions[0].category, null);
+});
+
+test('drill-down: орлого ч, зарлага ч аль аль нь тухайн өдрийн transactions-д орно (balance хоёуланд нөлөөлдөг тул)', async () => {
+  const { auth, userId } = await registerUser('bh-drill-both@example.com');
+  let mid = 0;
+  db.insertTransaction({ userId, messageId: `<bhdb${++mid}>`, amount: 500000, currency: 'MNT', date: '2026-06-10', type: 'income', description: 'Цалин', category: 'Орлого', status: 'classified' });
+  db.insertTransaction({ userId, messageId: `<bhdb${++mid}>`, amount: 12000, currency: 'MNT', date: '2026-06-10', type: 'expense', description: 'Хоол', category: 'Хүнсний зүйл', status: 'classified', balance: 488000 }); // anchor
+
+  const r = await getHistory(auth, '2026-06-10');
+  const json = await r.json();
+  const d = json.series.find((p) => p.date === '2026-06-10');
+  assert.equal(d.transactions.length, 2, 'орлого, зарлага хоёул орсон байх ёстой (balance-д хоёул нөлөөлдөг)');
+  const types = d.transactions.map((t) => t.type).sort();
+  assert.deepEqual(types, ['expense', 'income']);
+});
+
+test('drill-down: гүйлгээгүй өдөр → цэвэр хоосон transactions массив', async () => {
+  const { auth, userId } = await registerUser('bh-drill-empty@example.com');
+  db.insertTransaction({ userId, messageId: '<bhde1>', amount: 1000, currency: 'MNT', date: '2026-06-15', type: 'expense', status: 'classified', balance: 5000 }); // anchor
+
+  const r = await getHistory(auth, '2026-06-01');
+  const json = await r.json();
+  const emptyDay = json.series.find((p) => p.date === '2026-06-05');
+  assert.ok(emptyDay);
+  assert.deepEqual(emptyDay.transactions, []);
+});
+
 test('READ-ONLY: balance-history дуудсаны дараа ч transactions мөрийн тоо/утга өөрчлөгдөхгүй', async () => {
   const { auth, userId } = await registerUser('bh-readonly@example.com');
   db.insertTransaction({ userId, messageId: '<bhro1>', amount: 1000, currency: 'MNT', date: '2026-06-01', type: 'expense', balance: 5000 });
