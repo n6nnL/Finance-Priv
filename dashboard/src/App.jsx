@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { api, isAuthed, clearTokens, consumeAuthFragment } from './lib/api.js';
+import { applyAmountsMasked } from './lib/format.js';
 import Login from './components/Login.jsx';
 import Filters from './components/Filters.jsx';
 import Summary from './components/Summary.jsx';
@@ -54,6 +55,19 @@ export default function App() {
   const [pending, setPending] = useState({ data: [], total: 0 });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  // Дүнг нуух горим (privacy). localStorage-д хадгална → refresh хийсэн ч хэвээр.
+  const [masked, setMasked] = useState(() => {
+    try { return localStorage.getItem('maskAmounts') === '1'; } catch { return false; }
+  });
+  // render бүрт format.js-ийн модул тугийг state-тэй тааруулна (доорх бүх money()
+  // үүнийг уншина). masked өөрчлөгдвөл App re-render → memo-гүй хүү бүр дахин
+  // render хийж, нуусан/ил хэлбэрээ шинэчилнэ (өгөгдөл дахин татахгүй).
+  applyAmountsMasked(masked);
+  const toggleMask = () => setMasked((m) => {
+    const nv = !m;
+    try { localStorage.setItem('maskAmounts', nv ? '1' : '0'); } catch { /* ignore */ }
+    return nv;
+  });
 
   function logout() { clearTokens(); setAuthed(false); setUser(null); }
   function handle401(e) { if (e.status === 401) { clearTokens(); setAuthed(false); return true; } return false; }
@@ -189,6 +203,13 @@ export default function App() {
             </h1>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            {/* Дүнг нуух/харуулах toggle (privacy) */}
+            <button onClick={toggleMask}
+              title={masked ? 'Дүнг харуулах' : 'Дүнг нуух'}
+              aria-label={masked ? 'Дүнг харуулах' : 'Дүнг нуух'}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 38, height: 38, border: '1px solid #EAE1D3', background: '#FFFDF9', cursor: 'pointer', color: '#8C8578', fontSize: 16, borderRadius: 999, padding: 0, lineHeight: 1 }}>
+              {masked ? '🙈' : '👁'}
+            </button>
             <div style={{ fontSize: 13, color: '#8C8578', background: '#FFFDF9', border: '1px solid #EAE1D3', padding: '8px 13px', borderRadius: 999 }}>
               {currentMonthLabel()}
             </div>

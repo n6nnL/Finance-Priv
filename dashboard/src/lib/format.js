@@ -55,8 +55,20 @@ export function dateLabel(d) {
   return `${Number(m[2])}-р сарын ${Number(m[3])}`;
 }
 
+// ── Дүнг нуух (privacy) горим ──────────────────────────────────────────────
+// Бүх мөнгөн дүн money()-оор дамждаг тул энэ ганц цэгээс нууна. Модул түвшний
+// туг — App өөрийн state-тэй нь render үедээ applyAmountsMasked()-ээр тааруулна,
+// ингэснээр доор render хийгдэх бүх money() дуудлага зөв утга уншина. Анхны
+// ачаалалд localStorage-оос уншина (refresh хийсэн ч сонголт хадгалагдана).
+let _amountsMasked = (() => {
+  try { return localStorage.getItem('maskAmounts') === '1'; } catch { return false; }
+})();
+export function applyAmountsMasked(v) { _amountsMasked = !!v; }
+export function isAmountsMasked() { return _amountsMasked; }
+
 const nf = new Intl.NumberFormat('mn-MN', { maximumFractionDigits: 2 });
 export function money(n) {
+  if (_amountsMasked) return '*****₮'; // нуусан үед — тоог харуулахгүй
   if (n == null) return '-';
   return nf.format(Number(n)) + '₮';
 }
