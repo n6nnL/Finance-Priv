@@ -409,6 +409,31 @@ export function createDb(dbPath, opts = {}) {
       .map((r) => ({ date: r.date, net: Number(r.net), count: Number(r.cnt) }));
   }
 
+  const _dailySpendingRows = db.prepare(`
+    SELECT id, txn_date, description, merchant_place, category, amount, created_at
+    FROM transactions
+    WHERE user_id = ? AND type = 'expense' AND txn_date IS NOT NULL AND txn_date >= ? AND txn_date <= ?
+    ORDER BY txn_date ASC, id ASC`);
+
+  /**
+   * [from,to] мужийн ЗАРЛАГЫН мөр бүр (өдөр тутмын зарцуулалтын график/drill-down-д).
+   * Зөвхөн type='expense' (орлого хасагдана). Ангилаагүй (category NULL) мөрийг
+   * ЧЧ ХАСАХГҮЙ — тухайн өдрийн жагсаалтад хэвээр орно (frontend catLabel(null)
+   * → 'Ангилаагүй' гэж харуулна). READ-ONLY.
+   * @returns {{id:number, date:string, description:string|null, merchantPlace:string|null, category:string|null, amount:number, createdAt:string}[]}
+   */
+  function getDailySpendingRows(userId, fromYmd, toYmd) {
+    return _dailySpendingRows.all(userId, fromYmd, toYmd).map((r) => ({
+      id: Number(r.id),
+      date: r.txn_date,
+      description: r.description,
+      merchantPlace: r.merchant_place,
+      category: r.category,
+      amount: Number(r.amount),
+      createdAt: r.created_at,
+    }));
+  }
+
   /** Шүүлтийн WHERE — ҮРГЭЛЖ user_id-аар эхэлнэ (tenant isolation) */
   function buildWhere(userId, { from, to, category, type, q, minAmount, maxAmount, status } = {}) {
     const where = ['user_id = ?'];
@@ -931,6 +956,7 @@ export function createDb(dbPath, opts = {}) {
     createUser, getUserByEmail, getUserById, countUsers, getOwnerUserId,
     // transactions
     insertTransaction, getByMessageId, getById, getCurrentBalance, getBalanceAnchor, getDailyTxnStats,
+    getDailySpendingRows,
     listTransactions, getSummary,
     getMonthly, getByCategory, getCycleSpend, getPending, updateCategoryById, updateCategoryByPattern, updateNote,
     autoClassifyStalePending,

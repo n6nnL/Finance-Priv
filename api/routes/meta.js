@@ -5,6 +5,7 @@
 //    GET  /api/summary          — нийт зарлага/орлого + ангиллаар (шүүлттэй)
 //    GET  /api/balance          — одоогийн үлдэгдэл (сүүлийн txn_date-тэй мөрөөс)
 //    GET  /api/balance-history  — өдөр тутмын үлдэгдлийн сэргээлт (READ-ONLY)
+//    GET  /api/spending-history — өдөр тутмын зарлагын нийлбэр + drill-down (READ-ONLY)
 //    GET  /api/categories       — боломжит ангиллын жагсаалт (dropdown-д)
 //    POST /api/ai-categorize    — AI ангилал санал { description }
 //    GET  /api/overrides        — learned override жагсаалт
@@ -14,11 +15,16 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { listCategories } from '../categorize.js';
-import { ubYmd, reconstructBalanceSeries, detectGaps } from '../balanceHistory.js';
+import { ubYmd, enumerateDays, reconstructBalanceSeries, detectGaps } from '../balanceHistory.js';
+import { currentCycle } from '../budgetCycle.js';
 import { logger } from '../logger.js';
 
 const BalanceHistoryQuerySchema = z.object({
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'from нь YYYY-MM-DD байх ёстой'),
+});
+
+const SpendingHistoryQuerySchema = z.object({
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'from нь YYYY-MM-DD байх ёстой').optional(),
 });
 
 export function createMetaRouter({ db, ai }) {
@@ -122,6 +128,46 @@ export function createMetaRouter({ db, ai }) {
       return res.status(200).json({ status: 'ok', from, to, available: true, anchor, series, gaps });
     } catch (err) {
       logger.error('GET /balance-history алдаа', { err: err?.message });
+      return res.status(500).json({ status: 'error', error: 'Internal Server Error' });
+    }
+  });
+
+  // ---- GET /api/spending-history?from=YYYY-MM-DD — өдөр тутмын зарлагын түүх ----
+  //  READ-ONLY: transactions/category_overrides-д огт бичихгүй. from өгөгдөөгүй бол
+  //  идэвхтэй циклийн эхлэл (currentCycle) — тогтмол огноо БИШ. Зөвхөн ЗАРЛАГА
+  //  (type='expense') нийлбэрлэгдэнэ; орлого хассан. Ангилаагүй мөр ХАСАГДАХГҮЙ —
+  //  тухайн өдрийн drill-down жагсаалтад хэвээр орно.
+  router.get('/spending-history', (req, res) => {
+    try {
+      const parsed = SpendingHistoryQuerySchema.safeParse(req.query || {});
+      if (!parsed.success) {
+        return res.status(400).json({ status: 'error', error: 'from параметр буруу (YYYY-MM-DD байх ёстой)' });
+      }
+      const to = ubYmd();
+      let from = parsed.data.from;
+      if (!from) {
+        const settings = db.getSettings(req.userId);
+        from = currentCycle(new Date(), settings.paydayDay).start;
+      }
+      if (from > to) {
+        return res.status(400).json({ status: 'error', error: 'from нь өнөөдрөөс хойш байж болохгүй' });
+      }
+
+      const rows = db.getDailySpendingRows(req.userId, from, to);
+      const byDate = new Map();
+      for (const r of rows) {
+        if (!byDate.has(r.date)) byDate.set(r.date, []);
+        byDate.get(r.date).push(r);
+      }
+      const series = enumerateDays(from, to).map((date) => {
+        const transactions = byDate.get(date) || [];
+        const total = transactions.reduce((s, t) => s + t.amount, 0);
+        return { date, total, transactions };
+      });
+
+      return res.status(200).json({ status: 'ok', from, to, series });
+    } catch (err) {
+      logger.error('GET /spending-history алдаа', { err: err?.message });
       return res.status(500).json({ status: 'error', error: 'Internal Server Error' });
     }
   });

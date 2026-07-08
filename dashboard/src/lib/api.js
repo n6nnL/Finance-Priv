@@ -148,6 +148,7 @@ export const api = {
   summary: (filters) => req('/api/summary' + qs(filters)),
   balance: () => req('/api/balance'),
   balanceHistory: (from) => req('/api/balance-history' + qs({ from })),
+  spendingHistory: (from) => req('/api/spending-history' + qs({ from })),
   monthly: (months) => req('/api/monthly' + qs({ months })),
   byCategory: (month) => req('/api/analytics/by-category' + qs({ month })),
   categories: () => req('/api/categories'),

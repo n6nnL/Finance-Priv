@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api.js';
 import { money, catLabel, catEmoji, catHex } from '../lib/format.js';
+import SpendingHistory from './SpendingHistory.jsx';
 
 const PERIODS = [
   { id: 1, label: 'Энэ сар' },
@@ -207,6 +208,9 @@ export default function Analyze() {
           </div>
         )}
       </div>
+
+      {/* Өдөр тутмын зарлагын түүх — ТУСДАА, НЭМЭЛТ карт (дээрхийг хөндөхгүй) */}
+      <SpendingHistory />
     </div>
   );
 }
