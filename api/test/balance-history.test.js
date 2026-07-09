@@ -104,12 +104,44 @@ test('anchor байхгүй хэрэглэгч → хоосон цуврал + a
   assert.equal(json.anchor, null);
 });
 
-test('from параметр буруу/байхгүй → 400', async () => {
+test('from параметр буруу/байхгүй, range-гүй → 400', async () => {
   const { auth } = await registerUser('bh-badq@example.com');
   const r1 = await getHistory(auth, '2026-4-1');
   assert.equal(r1.status, 400);
   const r2 = await fetch(`${baseUrl}/api/balance-history`, { headers: auth });
   assert.equal(r2.status, 400);
+});
+
+test('range=7d → сервер today-гоос 7 хоногийн from-г өөрөө тооцно', async () => {
+  const { auth, userId } = await registerUser('bh-range@example.com');
+  const today = ubYmd();
+  db.insertTransaction({ userId, messageId: '<bhr1>', amount: 1000, currency: 'MNT', date: today, type: 'expense', balance: 5000 });
+
+  const r = await fetch(`${baseUrl}/api/balance-history?range=7d`, { headers: auth });
+  assert.equal(r.status, 200);
+  const json = await r.json();
+  assert.equal(json.to, today);
+  assert.equal(json.from, addDaysYmd(today, -6));
+  assert.equal(json.series.length, 7);
+});
+
+test('custom from+to (to < өнөөдөр) → зөв мужаар сэргээнэ', async () => {
+  const { auth, userId } = await registerUser('bh-customto@example.com');
+  db.insertTransaction({ userId, messageId: '<bhc1>', amount: 1000, currency: 'MNT', date: '2026-06-01', type: 'expense', balance: 9000 }); // anchor
+
+  const r = await fetch(`${baseUrl}/api/balance-history?from=2026-05-28&to=2026-06-01`, { headers: auth });
+  assert.equal(r.status, 200);
+  const json = await r.json();
+  assert.equal(json.from, '2026-05-28');
+  assert.equal(json.to, '2026-06-01');
+  assert.equal(json.series.length, 5);
+});
+
+test('to > өнөөдөр → 400', async () => {
+  const { auth } = await registerUser('bh-futureto@example.com');
+  const future = addDaysYmd(ubYmd(), 30);
+  const r = await fetch(`${baseUrl}/api/balance-history?from=2026-01-01&to=${future}`, { headers: auth });
+  assert.equal(r.status, 400);
 });
 
 test('anchor + гүйлгээнүүдтэй хэрэглэгч → series-ийн сүүлийн өдрийн утга anchor-той тохирно', async () => {

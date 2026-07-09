@@ -52,6 +52,7 @@ export const DEFAULT_SETTINGS = {
   budgetFloor: null, // хамгаалах доод үлдэгдэл — салинтай адил default null (хуурамч тоо ХЭЗЭЭ Ч биш)
   paydayDay: 15,
   usdMnt: 3578,
+  eurMnt: 4120,
   subscriptions: [
     { name: 'Netflix', day: 7, amountUsd: 3.99 },
     { name: 'Claude', day: 25, amountUsd: 20 },

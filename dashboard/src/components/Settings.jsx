@@ -23,6 +23,7 @@ function sanitize(d) {
     budgetFloor: intOrNull(d.budgetFloor),
     paydayDay: Math.min(Math.max(intOr(d.paydayDay, 15), 1), 28),
     usdMnt: Math.max(1, numOr(d.usdMnt, 3578)),
+    eurMnt: Math.max(1, numOr(d.eurMnt, 4120)),
     subscriptions: (d.subscriptions || [])
       .filter((s) => String(s.name).trim())
       .map((s) => ({
@@ -50,6 +51,23 @@ export default function Settings({ settings, onSave, onClose, saving }) {
   const [telegramConnected, setTelegramConnected] = useState(null); // null = ачаалж байна
   const [telegramCode, setTelegramCode] = useState(null); // { code, expiresAt } | null
   const [telegramBusy, setTelegramBusy] = useState(false);
+  // Өнөөдрийн USD/EUR→MNT амьд ханш (GET /api/fx-rates, 1ц кэштэй сервер талд).
+  // Зөвхөн лавлагаа/санал — хэрэглэгч "Ашиглах" дарж draft-даа хуулна, дараа нь
+  // Хадгалах дарж хадгална (тохиргоо сервэрт шууд бичигдэхгүй).
+  const [fx, setFx] = useState(null); // { usdMnt, eurMnt, asOf, cached, stale } | null
+  const [fxLoading, setFxLoading] = useState(false);
+  const [fxErr, setFxErr] = useState('');
+  const loadFx = () => {
+    setFxLoading(true);
+    setFxErr('');
+    api.fxRates()
+      .then((r) => setFx(r))
+      .catch((e) => setFxErr(e.body?.error || e.message || 'Ханшийн мэдээлэл татаж чадсангүй'))
+      .finally(() => setFxLoading(false));
+  };
+  useEffect(() => { loadFx(); }, []);
+  const applyFx = () => { if (fx) set({ usdMnt: fx.usdMnt, eurMnt: fx.eurMnt }); };
+
   const refetchConnections = () => api.me().then((r) => {
     setCalendarConnected(!!r.user?.calendarConnected);
     setGmail({
@@ -117,8 +135,44 @@ export default function Settings({ settings, onSave, onClose, saving }) {
         )}
       </div>
 
-      {/* Цалин / хамгаалах доод үлдэгдэл / payday / ханш */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-[12px]">
+      {/* Өнөөдрийн амьд ханш — лавлагаа, "Ашиглах" дарж доорх ханшны талбаруудад хуулна */}
+      <div className="bg-white border border-cream-border rounded-[12px] p-[14px] flex flex-col gap-[10px]">
+        <div className="flex items-center justify-between gap-[10px] flex-wrap">
+          <div className="text-[14px] font-semibold text-[#4A453D]">💱 Өнөөдрийн ханш</div>
+          <button onClick={loadFx} disabled={fxLoading} aria-label="Ханш дахин татах"
+            className="h-[30px] px-[10px] border border-cream-border bg-white rounded-[8px] text-[12px] font-medium text-[#1F7A6B] cursor-pointer whitespace-nowrap disabled:opacity-60">
+            {fxLoading ? 'Татаж байна…' : '🔄 Шинэчлэх'}
+          </button>
+        </div>
+        {fxLoading && !fx && <div className="text-[13px] text-[#A39A8A]">Ханшийн мэдээлэл татаж байна…</div>}
+        {fxErr && !fx && <div className="text-[13px] text-[#D8483B]">{fxErr}</div>}
+        {fx && (
+          <>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-[10px]">
+              <div className="flex items-center justify-between bg-[#FBF7EF] border border-[#E3DACB] rounded-[9px] px-[12px] py-[8px]">
+                <span className="text-[13px] text-[#6E665A]">USD → MNT</span>
+                <span className="font-display font-semibold text-[15px] whitespace-nowrap">{fx.usdMnt.toLocaleString('mn-MN')}₮</span>
+              </div>
+              <div className="flex items-center justify-between bg-[#FBF7EF] border border-[#E3DACB] rounded-[9px] px-[12px] py-[8px]">
+                <span className="text-[13px] text-[#6E665A]">EUR → MNT</span>
+                <span className="font-display font-semibold text-[15px] whitespace-nowrap">{fx.eurMnt.toLocaleString('mn-MN')}₮</span>
+              </div>
+            </div>
+            <div className="flex items-center justify-between gap-[10px] flex-wrap">
+              <span className="text-[12px] text-[#A39A8A]">
+                {fx.asOf ? `Шинэчилсэн: ${fx.asOf}` : ''}{fx.stale ? ' — сүүлд амжилттай татсан утга (одоо холбогдож чадсангүй)' : fx.cached ? ' (кэшлэгдсэн)' : ''}
+              </span>
+              <button onClick={applyFx}
+                className="h-[30px] px-[12px] border-none bg-brand text-white rounded-[8px] text-[12px] font-semibold cursor-pointer whitespace-nowrap">
+                Доорх талбарт ашиглах
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Цалин / хамгаалах доод үлдэгдэл / payday */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-[12px]">
         <div>
           <label className={labelCls}>Цалин (₮)</label>
           <input type="number" inputMode="numeric" className={inputCls}
@@ -139,11 +193,21 @@ export default function Settings({ settings, onSave, onClose, saving }) {
             value={draft.paydayDay ?? ''}
             onChange={(e) => set({ paydayDay: e.target.value })} />
         </div>
+      </div>
+
+      {/* Валютын ханш (тооцоонд ашиглагдана — захиалга/гар аргаар удирдсан хөрөнгө г.м) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-[12px]">
         <div>
           <label className={labelCls}>USD→MNT ханш</label>
           <input type="number" inputMode="numeric" className={inputCls}
             value={draft.usdMnt ?? ''}
             onChange={(e) => set({ usdMnt: e.target.value })} />
+        </div>
+        <div>
+          <label className={labelCls}>EUR→MNT ханш</label>
+          <input type="number" inputMode="numeric" className={inputCls}
+            value={draft.eurMnt ?? ''}
+            onChange={(e) => set({ eurMnt: e.target.value })} />
         </div>
       </div>
 

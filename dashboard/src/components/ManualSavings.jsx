@@ -23,6 +23,8 @@ export default function ManualSavings() {
   const [editingId, setEditingId] = useState(null);
   const [saving, setSaving] = useState(false);
   const [formErr, setFormErr] = useState('');
+  // Тохиргоонд хадгалсан EUR→MNT ханш — "Өнөөдрийн ханш" товчоор хурдан бөглөхөд.
+  const [defaultEurMnt, setDefaultEurMnt] = useState(null);
 
   const load = useCallback(async () => {
     try {
@@ -33,6 +35,9 @@ export default function ManualSavings() {
     }
   }, []);
   useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    api.getSettings().then((r) => setDefaultEurMnt(r?.settings?.eurMnt ?? null)).catch(() => {});
+  }, []);
 
   // EUR + ханш хоёул эерэг бол MNT-г автоматаар тооцож бөглөнө (хэрэглэгч дараа нь гараар засаж болно).
   const set = (patch) => setForm((f) => {
@@ -138,8 +143,17 @@ export default function ManualSavings() {
           </div>
           <div>
             <label className={labelCls}>Ханш (сонголт)</label>
-            <input type="number" inputMode="decimal" className={inputCls} placeholder="ж: 3910"
-              value={form.exchangeRate} onChange={(e) => set({ exchangeRate: e.target.value })} />
+            <div className="flex gap-[6px]">
+              <input type="number" inputMode="decimal" className={inputCls} placeholder="ж: 3910"
+                value={form.exchangeRate} onChange={(e) => set({ exchangeRate: e.target.value })} />
+              {defaultEurMnt != null && (
+                <button type="button" onClick={() => set({ exchangeRate: String(defaultEurMnt) })}
+                  title={`Тохиргооны EUR→MNT ханш ашиглах (${defaultEurMnt}₮)`}
+                  className="h-[42px] px-[10px] shrink-0 border border-cream-border bg-white rounded-[10px] text-[12px] font-medium text-[#1F7A6B] cursor-pointer whitespace-nowrap">
+                  Өнөөдрийн
+                </button>
+              )}
+            </div>
           </div>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-[10px]">

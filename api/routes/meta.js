@@ -5,22 +5,33 @@
 //    GET  /api/summary          — нийт зарлага/орлого + ангиллаар (шүүлттэй)
 //    GET  /api/balance          — одоогийн үлдэгдэл (сүүлийн txn_date-тэй мөрөөс)
 //    GET  /api/balance-history  — өдөр тутмын үлдэгдлийн сэргээлт + өдөр тутмын
-//                                  гүйлгээний drill-down (READ-ONLY)
+//                                  гүйлгээний drill-down (READ-ONLY). Хугацааны муж:
+//                                  ?range=7d|30d|90d|180d|365d (сервер today-гоос
+//                                  тооцно) ЭСВЭЛ ?from=YYYY-MM-DD[&to=YYYY-MM-DD]
+//                                  (custom, to сонголт — өгөхгүй бол өнөөдөр).
 //    GET  /api/categories       — боломжит ангиллын жагсаалт (dropdown-д)
 //    POST /api/ai-categorize    — AI ангилал санал { description }
 //    GET  /api/overrides        — learned override жагсаалт
 //    POST /api/overrides        — learned override нэмэх { merchantPattern, category }
+//    GET  /api/fx-rates         — өнөөдрийн USD→MNT, EUR→MNT амьд ханш (1ц кэштэй)
 // ============================================================
 
 import { Router } from 'express';
 import { z } from 'zod';
 import { listCategories } from '../categorize.js';
-import { ubYmd, reconstructBalanceSeries, detectGaps } from '../balanceHistory.js';
+import { ubYmd, addDaysYmd, reconstructBalanceSeries, detectGaps } from '../balanceHistory.js';
+import { getLiveFxRates } from '../fx.js';
 import { logger } from '../logger.js';
 
-const BalanceHistoryQuerySchema = z.object({
-  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'from нь YYYY-MM-DD байх ёстой'),
-});
+const RANGE_DAYS = { '7d': 7, '30d': 30, '90d': 90, '180d': 180, '365d': 365 };
+const YMD_RE = /^\d{4}-\d{2}-\d{2}$/;
+const BalanceHistoryQuerySchema = z
+  .object({
+    range: z.enum(['7d', '30d', '90d', '180d', '365d']).optional(),
+    from: z.string().regex(YMD_RE, 'from нь YYYY-MM-DD байх ёстой').optional(),
+    to: z.string().regex(YMD_RE, 'to нь YYYY-MM-DD байх ёстой').optional(),
+  })
+  .refine((v) => v.range || v.from, { message: 'range ЭСВЭЛ from параметр шаардлагатай' });
 
 export function createMetaRouter({ db, ai }) {
   const router = Router();
@@ -93,12 +104,18 @@ export function createMetaRouter({ db, ai }) {
     try {
       const parsed = BalanceHistoryQuerySchema.safeParse(req.query || {});
       if (!parsed.success) {
-        return res.status(400).json({ status: 'error', error: 'from параметр (YYYY-MM-DD) шаардлагатай' });
+        return res.status(400).json({ status: 'error', error: 'range эсвэл from параметр (YYYY-MM-DD) шаардлагатай' });
       }
-      const { from } = parsed.data;
-      const to = ubYmd();
+      const today = ubYmd();
+      const to = parsed.data.to || today;
+      if (to > today) {
+        return res.status(400).json({ status: 'error', error: 'to нь өнөөдрөөс хойш байж болохгүй' });
+      }
+      // range (ж: '90d') байвал сервер өөрөө today-гоос from тооцно (client TZ-оос
+      // үл хамааран тогтвортой); эс бөгөөс тодорхой from ашиглана.
+      const from = parsed.data.range ? addDaysYmd(to, -(RANGE_DAYS[parsed.data.range] - 1)) : parsed.data.from;
       if (from > to) {
-        return res.status(400).json({ status: 'error', error: 'from нь өнөөдрөөс хойш байж болохгүй' });
+        return res.status(400).json({ status: 'error', error: 'from нь to-оос хойш байж болохгүй' });
       }
 
       const anchor = db.getBalanceAnchor(req.userId);
@@ -137,6 +154,20 @@ export function createMetaRouter({ db, ai }) {
     } catch (err) {
       logger.error('GET /balance-history алдаа', { err: err?.message });
       return res.status(500).json({ status: 'error', error: 'Internal Server Error' });
+    }
+  });
+
+  // ---- GET /api/fx-rates — өнөөдрийн USD→MNT, EUR→MNT амьд ханш (READ-ONLY) ----
+  //  Тохиргоо хэсэгт "өнөөдрийн ханш" харуулж, хэрэглэгч дараа нь тохиргоондоо
+  //  (usdMnt/eurMnt) хэрэглэхээр авахад ашиглана. Гадаад провайдер унавал 502 +
+  //  тодорхой алдаа буцаана — тохиргоо гараар засах боломж үргэлж үлдэнэ.
+  router.get('/fx-rates', async (_req, res) => {
+    try {
+      const rates = await getLiveFxRates();
+      return res.status(200).json({ status: 'ok', ...rates });
+    } catch (err) {
+      logger.error('GET /fx-rates алдаа', { err: err?.message });
+      return res.status(502).json({ status: 'error', error: 'Ханшийн мэдээлэл татаж чадсангүй' });
     }
   });
 

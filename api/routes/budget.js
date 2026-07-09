@@ -38,6 +38,7 @@ const SettingsSchema = z.object({
   budgetFloor: z.number().int('budgetFloor бүхэл тоо').nonnegative('budgetFloor >= 0').nullable().default(null),
   paydayDay: z.number().int().min(1).max(28).default(DEFAULT_SETTINGS.paydayDay),
   usdMnt: z.number().positive('usdMnt > 0').finite().default(DEFAULT_SETTINGS.usdMnt),
+  eurMnt: z.number().positive('eurMnt > 0').finite().default(DEFAULT_SETTINGS.eurMnt),
   subscriptions: z.array(SubscriptionSchema).max(50).default(DEFAULT_SETTINGS.subscriptions),
   categoryAllocations: z.array(AllocationSchema).max(50).default(DEFAULT_SETTINGS.categoryAllocations),
 }).strict();

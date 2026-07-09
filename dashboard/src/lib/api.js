@@ -147,7 +147,9 @@ export const api = {
   pending: (p) => req('/api/transactions/pending' + qs(p)),
   summary: (filters) => req('/api/summary' + qs(filters)),
   balance: () => req('/api/balance'),
-  balanceHistory: (from) => req('/api/balance-history' + qs({ from })),
+  // params: { range: '7d'|'30d'|'90d'|'180d'|'365d' } ЭСВЭЛ { from, to? } (custom муж)
+  balanceHistory: (params) => req('/api/balance-history' + qs(params)),
+  fxRates: () => req('/api/fx-rates'),
   monthly: (months) => req('/api/monthly' + qs({ months })),
   byCategory: (month) => req('/api/analytics/by-category' + qs({ month })),
   categories: () => req('/api/categories'),
