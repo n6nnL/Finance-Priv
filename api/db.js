@@ -299,6 +299,15 @@ export function createDb(dbPath, opts = {}) {
       created_at    TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at    TEXT NOT NULL DEFAULT (datetime('now')))`);
     db.exec('CREATE INDEX IF NOT EXISTS idx_manual_ledger_user ON manual_ledger_entries (user_id)');
+
+    // 014: ГАР АРГААР УДИРДСАН ХӨРӨНГӨ — currency багана (EUR-г байгальд нь хадгална) --
+    // Хуучин зан төлөв: EUR × ханшийг frontend оруулах агшинд MNT болгож
+    // "царцаадаг" байсан нь ханш хожим өөрчлөгдөхөд буруу болдог асуудлыг засна.
+    // EUR мөрд amount ЗААВАЛ EUR дүн, currency='EUR' — MNT рүү зөвхөн display үед
+    // (амьд ханшаар) хөрвүүлнэ. Хуучин мөрүүд бүгд currency='MNT' болно (DEFAULT).
+    if (!hasColumn('manual_ledger_entries', 'currency')) {
+      db.exec("ALTER TABLE manual_ledger_entries ADD COLUMN currency TEXT NOT NULL DEFAULT 'MNT'");
+    }
   }
   migrate();
 
@@ -888,18 +897,22 @@ export function createDb(dbPath, opts = {}) {
 
   // ===================== ГАР АРГААР УДИРДСАН ХӨРӨНГӨ (manual ledger, per-user) =====================
   const _insertLedger = db.prepare(`
-    INSERT INTO manual_ledger_entries (user_id, entry_date, type, amount, amount_eur, exchange_rate, note, created_at, updated_at)
-    VALUES (@user_id, @entry_date, @type, @amount, @amount_eur, @exchange_rate, @note, datetime('now'), datetime('now'))`);
+    INSERT INTO manual_ledger_entries (user_id, entry_date, type, amount, currency, amount_eur, exchange_rate, note, created_at, updated_at)
+    VALUES (@user_id, @entry_date, @type, @amount, @currency, @amount_eur, @exchange_rate, @note, datetime('now'), datetime('now'))`);
   const _getLedgerEntry = db.prepare('SELECT * FROM manual_ledger_entries WHERE id=? AND user_id=?');
   const _listLedger = db.prepare('SELECT * FROM manual_ledger_entries WHERE user_id=? ORDER BY entry_date DESC, id DESC');
   const _updateLedger = db.prepare(`
     UPDATE manual_ledger_entries
-    SET entry_date=@entry_date, type=@type, amount=@amount, amount_eur=@amount_eur,
+    SET entry_date=@entry_date, type=@type, amount=@amount, currency=@currency, amount_eur=@amount_eur,
         exchange_rate=@exchange_rate, note=@note, updated_at=datetime('now')
     WHERE id=@id AND user_id=@user_id`);
   const _deleteLedger = db.prepare('DELETE FROM manual_ledger_entries WHERE id=? AND user_id=?');
+  // Валют тус бүрийг тусад нь нийлбэрлэнэ — MNT ба EUR-ийг хэзээ ч нэг тоонд
+  // хольж нэмэхгүй (хөрвүүлэлт зөвхөн display үед, frontend талд амьд ханшаар).
   const _ledgerBalance = db.prepare(`
-    SELECT COALESCE(SUM(CASE WHEN type='deposit' THEN amount ELSE -amount END), 0) AS balance
+    SELECT
+      COALESCE(SUM(CASE WHEN currency='MNT' THEN (CASE WHEN type='deposit' THEN amount ELSE -amount END) ELSE 0 END), 0) AS mnt,
+      COALESCE(SUM(CASE WHEN currency='EUR' THEN (CASE WHEN type='deposit' THEN amount ELSE -amount END) ELSE 0 END), 0) AS eur
     FROM manual_ledger_entries WHERE user_id=?`);
 
   const _mapLedger = (r) => (r ? {
@@ -907,6 +920,7 @@ export function createDb(dbPath, opts = {}) {
     date: r.entry_date,
     type: r.type,
     amount: Number(r.amount),
+    currency: r.currency || 'MNT',
     amountEur: r.amount_eur == null ? null : Number(r.amount_eur),
     exchangeRate: r.exchange_rate == null ? null : Number(r.exchange_rate),
     note: r.note ?? null,
@@ -914,9 +928,10 @@ export function createDb(dbPath, opts = {}) {
     updatedAt: r.updated_at,
   } : null);
 
-  /** Balance = signed sum (deposit +, withdrawal -). */
+  /** Balance = signed sum, валют тус бүрээр тусад ({mnt, eur}). */
   function getManualLedgerBalance(userId) {
-    return Number(_ledgerBalance.get(userId).balance);
+    const row = _ledgerBalance.get(userId);
+    return { mnt: Number(row.mnt), eur: Number(row.eur) };
   }
 
   /** Жагсаалт (entry_date DESC) + balance нэг дор. */
@@ -930,6 +945,7 @@ export function createDb(dbPath, opts = {}) {
       entry_date: e.date,
       type: e.type,
       amount: e.amount,
+      currency: e.currency || 'MNT',
       amount_eur: e.amountEur ?? null,
       exchange_rate: e.exchangeRate ?? null,
       note: e.note ?? null,
@@ -941,7 +957,7 @@ export function createDb(dbPath, opts = {}) {
   function updateManualLedgerEntry(userId, id, e) {
     const res = _updateLedger.run({
       id, user_id: userId,
-      entry_date: e.date, type: e.type, amount: e.amount,
+      entry_date: e.date, type: e.type, amount: e.amount, currency: e.currency || 'MNT',
       amount_eur: e.amountEur ?? null, exchange_rate: e.exchangeRate ?? null, note: e.note ?? null,
     });
     if (res.changes === 0) return null;

@@ -1,30 +1,31 @@
 import { useEffect, useState, useCallback } from 'react';
 import { api } from '../lib/api.js';
-import { money } from '../lib/format.js';
+import { money, eurFmt } from '../lib/format.js';
 
 // Гар аргаар удирдсан хөрөнгө (бэлэн мөнгө/EUR) — Голомт Gmail listener харахгүй
 // мөнгө. BudgetTracker/BalanceHistory-аас тусдаа, НЭМЭЛТ view (тэднийг хөндөхгүй).
-// amount (MNT) ЗААВАЛ, эерэг — balance-д ашиглагдах цорын ганц утга. EUR/ханш нь
-// зөвхөн лавлагаа, frontend талд MNT-г автоматаар тооцож бөглөнө (гараар засаж болно).
+// amount нь entry-ийн ЭХ валютаараа (currency талбараар заасан) хадгалагдана —
+// EUR мөрийг хэзээ ч MNT болгож хувиргаж хадгалдаггүй. MNT рүү хөрвүүлэлт зөвхөн
+// дэлгэцэнд харуулах агшинд, өнөөдрийн (эсвэл сүүлд амжилттай татсан) ханшаар.
 
 const TEAL = '#1F7A6B';
 const RED = '#D8483B';
 
-const emptyForm = { date: '', type: 'deposit', amount: '', amountEur: '', exchangeRate: '', note: '' };
+const emptyForm = { date: '', type: 'deposit', currency: 'MNT', amount: '', note: '' };
 
 const inputCls = 'h-[42px] px-[12px] border-[1.5px] border-cream-input rounded-[10px] bg-white font-body text-[14px] text-[#2A2722] outline-none w-full min-w-0';
 const labelCls = 'text-[13px] font-medium text-[#6E665A] mb-[6px] block';
 const cardCls = 'bg-cream-card border border-cream-border rounded-card p-[18px] flex flex-col gap-[16px]';
 
 export default function ManualSavings() {
-  const [data, setData] = useState(null); // { rows, balance } | null (ачаалж байна)
+  const [data, setData] = useState(null); // { rows, balance:{mnt,eur} } | null (ачаалж байна)
   const [err, setErr] = useState('');
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState(null);
   const [saving, setSaving] = useState(false);
   const [formErr, setFormErr] = useState('');
-  // Тохиргоонд хадгалсан EUR→MNT ханш — "Өнөөдрийн ханш" товчоор хурдан бөглөхөд.
-  const [defaultEurMnt, setDefaultEurMnt] = useState(null);
+  // Өнөөдрийн амьд ханш — EUR мөрийг дэлгэцэд MNT-руу хөрвүүлж харуулахад.
+  const [fx, setFx] = useState(null); // { usdMnt, eurMnt, asOf, cached, stale } | null
 
   const load = useCallback(async () => {
     try {
@@ -36,19 +37,10 @@ export default function ManualSavings() {
   }, []);
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
-    api.getSettings().then((r) => setDefaultEurMnt(r?.settings?.eurMnt ?? null)).catch(() => {});
+    api.fxRates().then(setFx).catch(() => {});
   }, []);
 
-  // EUR + ханш хоёул эерэг бол MNT-г автоматаар тооцож бөглөнө (хэрэглэгч дараа нь гараар засаж болно).
-  const set = (patch) => setForm((f) => {
-    const next = { ...f, ...patch };
-    const eur = Number(next.amountEur);
-    const rate = Number(next.exchangeRate);
-    if (('amountEur' in patch || 'exchangeRate' in patch) && eur > 0 && rate > 0) {
-      next.amount = String(Math.round(eur * rate));
-    }
-    return next;
-  });
+  const set = (patch) => setForm((f) => ({ ...f, ...patch }));
 
   const resetForm = () => { setForm(emptyForm); setEditingId(null); setFormErr(''); };
 
@@ -57,9 +49,8 @@ export default function ManualSavings() {
     setForm({
       date: row.date,
       type: row.type,
+      currency: row.currency || 'MNT',
       amount: String(row.amount),
-      amountEur: row.amountEur == null ? '' : String(row.amountEur),
-      exchangeRate: row.exchangeRate == null ? '' : String(row.exchangeRate),
       note: row.note || '',
     });
     setFormErr('');
@@ -69,13 +60,12 @@ export default function ManualSavings() {
     setFormErr('');
     const amount = Number(form.amount);
     if (!form.date) { setFormErr('Огноо шаардлагатай'); return; }
-    if (!(amount > 0)) { setFormErr('MNT дүн эерэг байх ёстой'); return; }
+    if (!(amount > 0)) { setFormErr(form.currency === 'EUR' ? 'EUR дүн эерэг байх ёстой' : 'MNT дүн эерэг байх ёстой'); return; }
     const payload = {
       date: form.date,
       type: form.type,
+      currency: form.currency,
       amount,
-      amountEur: form.amountEur === '' ? null : Number(form.amountEur),
-      exchangeRate: form.exchangeRate === '' ? null : Number(form.exchangeRate),
       note: form.note.trim() || null,
     };
     setSaving(true);
@@ -102,8 +92,11 @@ export default function ManualSavings() {
   if (err) return <div className={cardCls}><div className="text-[14px] text-[#D8483B]">{err}</div></div>;
   if (!data) return <div className={cardCls}><div className="text-[14px] text-[#8C8578]">Ачаалж байна…</div></div>;
 
-  const { rows, balance } = data;
-  const balNeg = balance < 0;
+  const { rows, balance } = data; // balance = { mnt, eur }
+  const eurConverted = balance.eur !== 0 && fx?.eurMnt ? balance.eur * fx.eurMnt : null;
+  const combinedMnt = balance.mnt + (eurConverted ?? 0);
+  const balNeg = combinedMnt < 0;
+  const showEurCaveat = balance.eur !== 0 && !fx?.eurMnt;
 
   return (
     <div className={cardCls}>
@@ -117,8 +110,18 @@ export default function ManualSavings() {
       <div className="rounded-[12px] p-[16px] text-white" style={{ background: 'linear-gradient(135deg,#1F7A6B,#2E9E7E)' }}>
         <div className="text-[13px] text-[rgba(255,255,255,0.82)] mb-[6px]">Гар аргаар удирдсан үлдэгдэл</div>
         <div className="font-display font-semibold text-[26px] tracking-[-0.5px] whitespace-nowrap">
-          {balNeg ? '−' : ''}{money(Math.abs(balance))}
+          {balNeg ? '−' : ''}{money(Math.abs(combinedMnt))}
         </div>
+        {showEurCaveat && (
+          <div className="text-[13px] text-[rgba(255,255,255,0.75)] mt-[4px] whitespace-nowrap">
+            + €{eurFmt(Math.abs(balance.eur))} (ханш алга — нийлбэрт ороогүй)
+          </div>
+        )}
+        {!showEurCaveat && balance.eur !== 0 && (
+          <div className="text-[13px] text-[rgba(255,255,255,0.75)] mt-[4px] whitespace-nowrap">
+            үүнээс €{eurFmt(Math.abs(balance.eur))} (ойролцоогоор {money(Math.abs(eurConverted))})
+          </div>
+        )}
       </div>
 
       {/* Форм: нэмэх/засах */}
@@ -137,35 +140,22 @@ export default function ManualSavings() {
             </select>
           </div>
           <div>
-            <label className={labelCls}>EUR дүн (сонголт)</label>
-            <input type="number" inputMode="decimal" className={inputCls} placeholder="ж: 100"
-              value={form.amountEur} onChange={(e) => set({ amountEur: e.target.value })} />
+            <label className={labelCls}>Валют</label>
+            <select className={inputCls} value={form.currency} onChange={(e) => set({ currency: e.target.value })}>
+              <option value="MNT">MNT (₮)</option>
+              <option value="EUR">EUR (€)</option>
+            </select>
           </div>
           <div>
-            <label className={labelCls}>Ханш (сонголт)</label>
-            <div className="flex gap-[6px]">
-              <input type="number" inputMode="decimal" className={inputCls} placeholder="ж: 3910"
-                value={form.exchangeRate} onChange={(e) => set({ exchangeRate: e.target.value })} />
-              {defaultEurMnt != null && (
-                <button type="button" onClick={() => set({ exchangeRate: String(defaultEurMnt) })}
-                  title={`Тохиргооны EUR→MNT ханш ашиглах (${defaultEurMnt}₮)`}
-                  className="h-[42px] px-[10px] shrink-0 border border-cream-border bg-white rounded-[10px] text-[12px] font-medium text-[#1F7A6B] cursor-pointer whitespace-nowrap">
-                  Өнөөдрийн
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-[10px]">
-          <div>
-            <label className={labelCls}>MNT дүн (заавал)</label>
-            <input type="number" inputMode="numeric" className={inputCls} placeholder="ж: 391000"
+            <label className={labelCls}>{form.currency === 'EUR' ? 'EUR дүн (заавал)' : 'MNT дүн (заавал)'}</label>
+            <input type="number" inputMode="decimal" className={inputCls}
+              placeholder={form.currency === 'EUR' ? 'ж: 100' : 'ж: 391000'}
               value={form.amount} onChange={(e) => set({ amount: e.target.value })} />
           </div>
-          <div>
-            <label className={labelCls}>Тэмдэглэл (сонголт)</label>
-            <input className={inputCls} placeholder="ж: цалингийн үлдэгдэл" value={form.note} onChange={(e) => set({ note: e.target.value })} />
-          </div>
+        </div>
+        <div>
+          <label className={labelCls}>Тэмдэглэл (сонголт)</label>
+          <input className={inputCls} placeholder="ж: цалингийн үлдэгдэл" value={form.note} onChange={(e) => set({ note: e.target.value })} />
         </div>
         {formErr && <div className="text-[13px] text-[#D8483B]">{formErr}</div>}
         <div className="flex items-center gap-[10px] flex-wrap">
@@ -194,12 +184,22 @@ export default function ManualSavings() {
             </span>
             <span className="min-w-0 flex-1 truncate text-[13px] text-[#6E665A]">
               {r.note || ''}
-              {r.amountEur != null && r.exchangeRate != null && (
+              {r.currency !== 'EUR' && r.amountEur != null && r.exchangeRate != null && (
                 <span className="text-[#A39A8A]"> (€{r.amountEur} × {r.exchangeRate})</span>
               )}
             </span>
             <span className="font-display font-semibold text-[14px] whitespace-nowrap shrink-0" style={{ color: r.type === 'deposit' ? TEAL : RED }}>
-              {r.type === 'deposit' ? '+' : '−'}{money(r.amount)}
+              {r.type === 'deposit' ? '+' : '−'}
+              {r.currency === 'EUR' ? (
+                <>
+                  €{eurFmt(r.amount)}
+                  {fx?.eurMnt != null && (
+                    <span className="text-[13px] font-normal text-[#A39A8A]"> ≈ {money(r.amount * fx.eurMnt)} (ойролцоогоор)</span>
+                  )}
+                </>
+              ) : (
+                money(r.amount)
+              )}
             </span>
             <div className="flex items-center gap-[6px] shrink-0">
               <button onClick={() => startEdit(r)} aria-label="Засах"

@@ -73,6 +73,15 @@ export function money(n) {
   return nf.format(Number(n)) + '₮';
 }
 
+// EUR дүнгийн тоон хэсгийг форматлана (тэмдэгт '€' дуудах газраа өөрөө
+// залгана — money()-той адил privacy-mask тугийг дагана).
+const nfEur = new Intl.NumberFormat('mn-MN', { maximumFractionDigits: 2 });
+export function eurFmt(n) {
+  if (_amountsMasked) return '*****';
+  if (n == null) return '-';
+  return nfEur.format(Number(n));
+}
+
 export function confLabel(c) {
   return { high: 'Өндөр', medium: 'Дунд', low: 'Бага' }[c] || c || '-';
 }

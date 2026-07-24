@@ -13,9 +13,12 @@
 //    PUT    /:id             — мөр засах (hard update)
 //    DELETE /:id             — мөр устгах (hard delete)
 //
-//  amount (MNT) ЗААВАЛ, эерэг — balance-д ашиглагдах цорын ганц утга. amountEur/
-//  exchangeRate — сонголттой, зөвхөн лавлагаа (frontend доторх auto-calc-ийн үр
-//  дүнг ХЭЗЭЭ Ч дахин тооцохгүй/шалгахгүй, ирсэн утгыг шууд хадгална).
+//  amount ЗААВАЛ, эерэг — entry-ийн ЭХ валютаараа (currency талбараар заасан)
+//  дүн; balance-д валют тус бүр тусад нь нийлбэрлэгдэнэ (backend хэзээ ч
+//  MNT/EUR-ийг хооронд нь хөрвүүлдэггүй — зөвхөн frontend display үед амьд
+//  ханшаар). amountEur/exchangeRate — сонголттой, зөвхөн legacy MNT
+//  мөрүүдийн лавлагаа тэмдэглэл (шинэ EUR мөрд ашиглагдахгүй, null байна).
+//  Ирсэн утгыг шууд хадгална, дахин тооцохгүй/шалгахгүй.
 // ============================================================
 
 import { Router } from 'express';
@@ -27,6 +30,9 @@ const EntrySchema = z.object({
   type: z.enum(['deposit', 'withdrawal'], {
     errorMap: () => ({ message: "type нь 'deposit' эсвэл 'withdrawal' байх ёстой" }),
   }),
+  currency: z.enum(['MNT', 'EUR'], {
+    errorMap: () => ({ message: "currency нь 'MNT' эсвэл 'EUR' байх ёстой" }),
+  }).default('MNT'),
   amount: z.number({ invalid_type_error: 'amount нь тоо байх ёстой' }).finite().positive('amount эерэг байх ёстой'),
   amountEur: z.number().finite().positive('amountEur эерэг байх ёстой').nullable().optional(),
   exchangeRate: z.number().finite().positive('exchangeRate эерэг байх ёстой').nullable().optional(),
