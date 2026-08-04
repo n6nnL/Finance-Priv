@@ -561,20 +561,27 @@ settle+орлого холбох→орлогын хасалт, re-open→буц
 - Calendar/Telegram холбогдоогүй. Telegram bot ажиллаж байна.
 - AI ангилал **унтраалттай** (`AI_CATEGORIZATION_ENABLED=false`) — credit байхгүй. Асаахад
   танигдаагүй мерчантад санал өгнө; унтраалттай үед зүгээр pending_review болно.
-- **Сүүлийн ажил (deploy ХИЙГЭЭГҮЙ) — Өрийн дэвтэр + төсвөөс хасах туг:** миграц 015
-  (`debt_ledger` + `transactions.excluded_from_budget`), `routes/debtLedger.js`,
+- **Сүүлийн ажил — Өрийн дэвтэр + төсвөөс хасах туг (commit `6951061`, серверт ГАРСАН):**
+  миграц 015 (`debt_ledger` + `transactions.excluded_from_budget`), `routes/debtLedger.js`,
   `PATCH /transactions/:id/exclusion`, `dashboard/src/lib/debt.js` (цэвэр netting),
   `DebtLedger.jsx` (Шинжилгээ табын дотор). Нөхөн төлбөрийн кэйс шийдэгдсэн: найзын
-  билетийн зардал ангиллын төсвөөс гарч, үлдэгдэлд хэвээр үлдэнэ. **Серверт гараагүй.**
+  билетийн зардал ангиллын төсвөөс гарч, үлдэгдэлд хэвээр үлдэнэ.
+  Production-д миграц баталгаажсан (`debt_ledger` + 3 индекс + багана байна).
 - **Өмнөх ажил — гүйлгээний үйлдлийн parity (§9):** `config/transactionActions.js` дундын
   капабилити модуль нэмэгдэж, Discord/Telegram/Website гурвуулан ижил чадвартай болсон
   (ангилал дахин засах, талбар засах, устгах, `applyToAll` default OFF + баталгаажуулалт).
   Backend: `PATCH /:id/category`-ийн override авто-эскалаци тасарсан (`learn = !!applyToAll`),
   `PATCH /:id/note` нь `merchantPlace`-ийг ч хүлээж авдаг болсон (шинэ route нэмээгүй).
   Энэ ажил **серверт гарсан** (commit `1f900e4`).
-- **Production дээрх бодит тоо (2026-08-04):** 2 хэрэглэгч (id=1 admin, id=3 user),
-  ~1,115 гүйлгээ, 39 learned override. ⚠️ Owner-ийн Gmail `reauth_needed` төлөвтэй —
-  сүүлийн бодит гүйлгээ 2026-08-02, шинэ и-мэйл татагдахгүй байна (Settings-ээс дахин холбох).
+- **Production-ы БОДИТ тоо (live DB-ээс уншсан, 2026-08-04 deploy-ийн дараа):**
+  `users` = **2** (id=1 admin, id=3 user) · `transactions` = **1,115**
+  (үүнээс 1 нь parity smoke-тестийн синтетик 1₮ мөр `id=1115 / 0930 ZZSMOKE0804BOM`
+  → жинхэнэ банкны гүйлгээ **1,114**, 2022-11-01 → 2026-08-02) ·
+  `category_overrides` = **39** (үүнээс 1 нь smoke-ийн `ZZSMOKE0804BOM`) ·
+  `debt_ledger` = **0** · `excluded_from_budget=1` мөр = **0** (бүх 1,115 мөр = 0).
+  Одоогийн үлдэгдэл 90,154.58₮.
+- ⚠️ Owner-ийн Gmail `reauth_needed` төлөвтэй — сүүлийн ЖИНХЭНЭ банкны гүйлгээ 2026-08-02,
+  шинэ и-мэйл татагдахгүй байна (dashboard → Тохиргоо → Gmail дахин холбох).
 - Өмнөх ажлууд: EUR-г эх валютаар хадгалах, амьд FX ханш, үлдэгдлийн график + муж
   сонголт, өдөр тутмын зарлагын drill-down, Бодит зарцуулалт харах/засах горим.
 - Хийгдээгүй/дараагийн боломж: `Insights` (Шийдвэр) таб placeholder хэвээр; хуучин ~1057
