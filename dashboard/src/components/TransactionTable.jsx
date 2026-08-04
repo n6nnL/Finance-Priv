@@ -1,10 +1,23 @@
 import { useState } from 'react';
 import { money, catLabel, catEmoji, catHex, hexTint, displayDesc } from '../lib/format.js';
 import { api } from '../lib/api.js';
+import {
+  ACTION_SET_CATEGORY, APPLY_TO_ALL_CONFIRM, detailFieldFor, findAction,
+} from '../../../config/transactionActions.js';
 
-export default function TransactionTable({ data, total, limit, offset, loading, onPage }) {
+// Гүйлгээний жагсаалт. Мөр дээр дарахад expand панель нээгдэж ангилал өөрчлөх,
+// талбар (POS→Газрын нэр / бусад→Шалтгаан) засах, applyToAll (default OFF,
+// баталгаажуулалттай) — аль үйлдэл, ямар талбар вэ гэдэг нь config/
+// transactionActions.js-ээс (Discord/Telegram-тай ИЖИЛ капабилити).
+export default function TransactionTable({ data, total, limit, offset, loading, categories = [], onPage }) {
   const page = Math.floor(offset / limit) + 1;
   const pages = Math.max(1, Math.ceil(total / limit));
+  const [expandedId, setExpandedId] = useState(null);
+  // Optimistic override: id → өөрчлөгдсөн талбарууд (refetch хүртэл server-ийн
+  // оронд харагдана; алдаа үед RowPanel rollback хийж хуучин утгыг буцаана).
+  const [patches, setPatches] = useState({});
+  const applyPatch = (id, fields) =>
+    setPatches((p) => ({ ...p, [id]: { ...(p[id] || {}), ...fields } }));
 
   if (!loading && data.length === 0) {
     return (
@@ -14,6 +27,8 @@ export default function TransactionTable({ data, total, limit, offset, loading, 
       </div>
     );
   }
+
+  const rows = data.map((t) => (patches[t.id] ? { ...t, ...patches[t.id] } : t));
 
   return (
     <div>
@@ -27,47 +42,62 @@ export default function TransactionTable({ data, total, limit, offset, loading, 
 
       {/* List */}
       <div className="bg-cream-card border border-cream-border rounded-card overflow-hidden">
-        {data.map((t, i) => {
+        {rows.map((t, i) => {
           const hex = catHex(t.category);
           const isIncome = t.type === 'income';
+          const expanded = expandedId === t.id;
           return (
-            <div
-              key={t.id}
-              className={`flex items-start sm:items-center gap-[14px] py-[14px] px-[18px] ${i < data.length - 1 ? 'border-b border-[#F2EADC]' : ''}`}
-            >
-              {/* Icon (fixed) */}
+            <div key={t.id} className={i < rows.length - 1 ? 'border-b border-[#F2EADC]' : ''}>
               <div
-                className="w-[42px] h-[42px] shrink-0 rounded-[12px] flex items-center justify-center text-[20px]"
-                style={{ background: hexTint(hex, 0.12) }}
+                onClick={() => setExpandedId(expanded ? null : t.id)}
+                title="Дэлгэрэнгүй засах"
+                className={`flex items-start sm:items-center gap-[14px] py-[14px] px-[18px] cursor-pointer ${expanded ? 'bg-[#FBF6EC]' : 'hover:bg-[#FCF8F0]'}`}
               >
-                {catEmoji(t.category)}
-              </div>
-
-              {/* Flexible region: stacks on mobile, icon·info·amount on sm+ */}
-              <div className="min-w-0 flex-1 flex flex-col gap-[4px] sm:flex-row sm:items-center sm:justify-between sm:gap-[14px]">
-                {/* Info */}
-                <div className="min-w-0 flex-1">
-                  <div className="font-semibold text-[14.5px] truncate" title={t.description}>
-                    {displayDesc(t)}
-                  </div>
-                  <div className="flex flex-wrap items-center gap-[8px] mt-[3px]">
-                    <span className="text-[13px] font-semibold px-[8px] py-[2px] rounded-full whitespace-nowrap" style={{ color: hex, background: hexTint(hex, 0.12) }}>
-                      {catLabel(t.category)}
-                    </span>
-                    {t.account_last4 && <span className="text-[13px] text-[#A39A8A] whitespace-nowrap">••{t.account_last4}</span>}
-                    {t.is_pos === 1 && <span className="text-[13px] text-[#3FA9A0] whitespace-nowrap">POS</span>}
-                  </div>
-                  <NoteEditor row={t} />
+                {/* Icon (fixed) */}
+                <div
+                  className="w-[42px] h-[42px] shrink-0 rounded-[12px] flex items-center justify-center text-[20px]"
+                  style={{ background: hexTint(hex, 0.12) }}
+                >
+                  {catEmoji(t.category)}
                 </div>
 
-                {/* Amount + date */}
-                <div className="text-left sm:text-right shrink-0">
-                  <div className="font-display font-semibold text-[15.5px] whitespace-nowrap" style={{ color: isIncome ? '#2E9E5B' : '#D8483B' }}>
-                    {isIncome ? '+' : '−'}{money(t.amount)}
+                {/* Flexible region: stacks on mobile, icon·info·amount on sm+ */}
+                <div className="min-w-0 flex-1 flex flex-col gap-[4px] sm:flex-row sm:items-center sm:justify-between sm:gap-[14px]">
+                  {/* Info */}
+                  <div className="min-w-0 flex-1">
+                    <div className="font-semibold text-[14.5px] truncate" title={t.description}>
+                      {displayDesc(t)}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-[8px] mt-[3px]">
+                      <span className="text-[13px] font-semibold px-[8px] py-[2px] rounded-full whitespace-nowrap" style={{ color: hex, background: hexTint(hex, 0.12) }}>
+                        {catLabel(t.category)}
+                      </span>
+                      {t.account_last4 && <span className="text-[13px] text-[#A39A8A] whitespace-nowrap">••{t.account_last4}</span>}
+                      {t.is_pos === 1 && <span className="text-[13px] text-[#3FA9A0] whitespace-nowrap">POS</span>}
+                    </div>
+                    {t.note && (
+                      <div className="mt-[2px] text-[13px] text-[#8C8578] truncate">📝 {t.note}</div>
+                    )}
                   </div>
-                  <div className="text-[13px] text-[#A39A8A] mt-[2px] whitespace-nowrap">{t.txn_date || '-'}</div>
+
+                  {/* Amount + date */}
+                  <div className="text-left sm:text-right shrink-0">
+                    <div className="font-display font-semibold text-[15.5px] whitespace-nowrap" style={{ color: isIncome ? '#2E9E5B' : '#D8483B' }}>
+                      {isIncome ? '+' : '−'}{money(t.amount)}
+                    </div>
+                    <div className="text-[13px] text-[#A39A8A] mt-[2px] whitespace-nowrap">{t.txn_date || '-'}</div>
+                  </div>
                 </div>
               </div>
+
+              {expanded && (
+                <RowPanel
+                  row={t}
+                  categories={categories}
+                  applyPatch={applyPatch}
+                  onClose={() => setExpandedId(null)}
+                />
+              )}
             </div>
           );
         })}
@@ -95,49 +125,128 @@ export default function TransactionTable({ data, total, limit, offset, loading, 
   );
 }
 
-function NoteEditor({ row }) {
-  const [note, setNote] = useState(row.note || '');
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(row.note || '');
+// Expand панель: ангилал chip-үүд + талбар (модулиас) + applyToAll (default OFF).
+// Optimistic: хадгалахад applyPatch-аар шууд харагдац шинэчлэгдэж, алдаа гарвал
+// хуучин утгууд руу rollback хийнэ.
+function RowPanel({ row, categories, applyPatch, onClose }) {
+  const catAction = findAction(row, ACTION_SET_CATEGORY);
+  const detail = detailFieldFor(row);
+  const [cat, setCat] = useState(row.category ?? null);
+  const [text, setText] = useState(detail.current || '');
+  const [applyAll, setApplyAll] = useState(false); // ⚠️ default OFF — санамсаргүй override үүсэхгүй
   const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  const trimmed = text.trim();
+  const catChanged = cat != null && cat !== (row.category ?? null);
+  const textChanged = (trimmed || null) !== (detail.current ?? null);
+  const dirty = catChanged || textChanged;
 
   async function save() {
-    setBusy(true);
+    if (!dirty) { onClose(); return; }
+    setBusy(true); setErr('');
+    // Optimistic — хадгалахын өмнөх утгуудыг rollback-д хадгална
+    const prev = { category: row.category ?? null, status: row.status, [detail.rowField]: detail.current ?? null };
+    const optimistic = { [detail.rowField]: trimmed || null };
+    if (catChanged) { optimistic.category = cat; optimistic.status = 'classified'; }
+    applyPatch(row.id, optimistic);
     try {
-      await api.updateNote(row.id, draft);
-      setNote(draft.trim());
-      setEditing(false);
-    } finally {
+      if (catChanged) {
+        // Ангилал (+ шинэ утгатай талбар) нэг PATCH-аар; applyToAll = зөвхөн
+        // хэрэглэгчийн сонгосон checkbox (default OFF)
+        await api.patchCategory(row.id, {
+          category: cat,
+          applyToAll: applyAll,
+          ...(textChanged && trimmed ? { [detail.apiField]: trimmed } : {}),
+        });
+        // /category-ийн талбар нь COALESCE (устгаж чадахгүй) — хоослосон бол тусад нь
+        if (textChanged && !trimmed) await api.updateFields(row.id, { [detail.apiField]: '' });
+      } else {
+        await api.updateFields(row.id, { [detail.apiField]: trimmed });
+      }
+      onClose();
+    } catch (e) {
+      applyPatch(row.id, prev); // rollback
+      setErr(e.message || 'Хадгалахад алдаа гарлаа');
       setBusy(false);
     }
   }
 
-  if (editing) {
-    return (
-      <div className="mt-[4px] flex items-center gap-[6px]">
-        <input
-          value={draft}
-          onChange={e => setDraft(e.target.value)}
-          autoFocus
-          autoComplete="off"
-          placeholder="тэмдэглэл..."
-          onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') setEditing(false); }}
-          className="border border-cream-input rounded-[8px] px-[8px] py-[3px] text-[13px] flex-1 min-w-0 font-body outline-none text-[#2A2722]"
-        />
-        <button disabled={busy} onClick={save} className="text-[13px] text-[#1F7A6B] border-none bg-transparent cursor-pointer">хадгалах</button>
-        <button onClick={() => { setDraft(note); setEditing(false); }} className="text-[13px] text-[#A39A8A] border-none bg-transparent cursor-pointer">×</button>
-      </div>
-    );
-  }
-
   return (
-    <div
-      onClick={() => { setDraft(note); setEditing(true); }}
-      title="Тэмдэглэл засах"
-      className="mt-[2px] text-[13px] cursor-pointer"
-      style={{ color: note ? '#8C8578' : '#D8CFBF' }}
-    >
-      {note ? `📝 ${note}` : '＋ тэмдэглэл'}
+    <div className="border-t border-[#F0E6D4] bg-[#FBF6EC] py-[16px] px-[18px]">
+      {/* Ангилал сонгох/өөрчлөх */}
+      <div className="text-[13px] font-medium text-[#6E665A] mb-[8px]">{catAction.label}</div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-[8px] mb-[16px]">
+        {categories.map((c) => {
+          const sel = cat === c;
+          const hx = catHex(c);
+          return (
+            <button
+              key={c}
+              onClick={() => setCat(c)}
+              className="flex items-center gap-[9px] py-[10px] px-[12px] border-[1.5px] rounded-[12px] cursor-pointer font-body text-[13.5px] text-left min-h-[44px]"
+              style={{
+                borderColor: sel ? hx : '#EFE6D6',
+                background: sel ? hexTint(hx, 0.14) : '#FFFDF9',
+                fontWeight: sel ? 600 : 500,
+                color: sel ? hx : '#4A453D',
+              }}
+            >
+              <span className="text-[16px] shrink-0">{catEmoji(c)}</span>
+              <span className="flex-1 truncate">{catLabel(c)}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Талбар — POS→Газрын нэр / бусад→Шалтгаан (модулиас) */}
+      <label className="block text-[13px] font-medium text-[#6E665A] mb-[7px]">{detail.label}</label>
+      <input
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        maxLength={detail.maxLength}
+        placeholder={detail.placeholder}
+        className="w-full h-[44px] px-[14px] border-[1.5px] border-cream-input rounded-[12px] bg-white font-body text-[14px] text-[#2A2722] outline-none mb-[14px]"
+      />
+
+      {/* applyToAll — зөвхөн ангилал өөрчлөгдөх үед утгатай */}
+      <label className={`flex items-start gap-[10px] mb-[16px] ${catChanged ? 'cursor-pointer' : 'opacity-45 cursor-not-allowed'}`}>
+        <input
+          type="checkbox"
+          checked={applyAll}
+          disabled={!catChanged}
+          onChange={(e) => setApplyAll(e.target.checked)}
+          className="mt-[2px] w-[18px] h-[18px] shrink-0 accent-[#1F7A6B]"
+        />
+        <span className="min-w-0">
+          <span className="block text-[13.5px] font-semibold text-[#4A453D]">{APPLY_TO_ALL_CONFIRM.question}</span>
+          <span className="block text-[13px] text-[#A39A8A] mt-[2px]">{APPLY_TO_ALL_CONFIRM.hint}</span>
+        </span>
+      </label>
+
+      {err && <div className="text-[#D8483B] text-[13px] mb-[10px]">{err}</div>}
+
+      {/* Товчнууд — 360px-д багана, sm+ мөр */}
+      <div className="flex flex-col gap-[10px] sm:flex-row">
+        <button
+          onClick={onClose}
+          className="h-[44px] px-[18px] border-[1.5px] border-cream-input bg-white rounded-[12px] font-body font-semibold text-[14px] text-[#6E665A] cursor-pointer"
+        >
+          Болих
+        </button>
+        <button
+          onClick={save}
+          disabled={busy || !dirty}
+          className="flex-1 h-[44px] border-none rounded-[12px] font-body font-semibold text-[14.5px]"
+          style={{
+            background: busy || !dirty ? '#E7DECF' : '#1F7A6B',
+            color: busy || !dirty ? '#B7AD9C' : '#fff',
+            cursor: busy || !dirty ? 'not-allowed' : 'pointer',
+          }}
+        >
+          {busy ? 'Хадгалж байна...' : 'Хадгалах'}
+        </button>
+      </div>
     </div>
   );
 }

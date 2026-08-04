@@ -3,7 +3,8 @@
 // ============================================================
 
 import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
-import { CATEGORIES, encodeButtonId, encodeEditButtonId } from './categories.js';
+import { CATEGORIES, encodeButtonId, encodeEditButtonId, encodeFieldButtonId } from './categories.js';
+import { isPendingTxn, detailFieldFor } from '../config/transactionActions.js';
 
 const COLOR_EXPENSE = 0xef4444; // улаан
 const COLOR_INCOME = 0x22c55e; // ногоон
@@ -28,7 +29,7 @@ export function displayName(tx) {
 /** Гүйлгээний embed бүтээх */
 export function buildEmbed(tx) {
   const isIncome = tx.type === 'income';
-  const pending = tx.status === 'pending_review' || tx.category == null;
+  const pending = isPendingTxn(tx);
   const color = pending ? COLOR_PENDING : isIncome ? COLOR_INCOME : COLOR_EXPENSE;
   const sign = isIncome ? '+' : '-';
 
@@ -64,24 +65,44 @@ export function buildButtonRows(txnId, isPos) {
   return rows;
 }
 
-/** Аль хэдийн ангилагдсан гүйлгээнд "Ангилал засах" товч (1 эгнээ) */
-export function buildEditRow(txnId) {
+/**
+ * Засварын эгнээ: "Ангилал засах" + "Талбар засах" (шошго дундын модулиас —
+ * POS→Газрын нэр / бусад→Шалтгаан).
+ */
+export function buildEditRow(tx) {
+  const detail = detailFieldFor(tx);
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder()
-      .setCustomId(encodeEditButtonId(txnId))
+      .setCustomId(encodeEditButtonId(tx.id))
       .setLabel('✏️ Ангилал засах')
+      .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId(encodeFieldButtonId(tx.id))
+      .setLabel(`📝 ${detail.label} засах`)
+      .setStyle(ButtonStyle.Secondary)
+  );
+}
+
+/** Pending мөрөнд дан талбар засах эгнээ (ангилалгүйгээр — гурван client ижил чадвар). */
+function buildFieldRow(tx) {
+  const detail = detailFieldFor(tx);
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(encodeFieldButtonId(tx.id))
+      .setLabel(`📝 ${detail.label} засах`)
       .setStyle(ButtonStyle.Secondary)
   );
 }
 
 /**
  * Гүйлгээний төлөвт тохирох component-ууд:
- *  - pending_review → ангиллын товчлуурууд (баталгаажуулах)
- *  - classified     → "Ангилал засах" товч (дахин засах боломж)
+ *  - pending_review → ангиллын товчлуурууд + талбар засах
+ *  - classified     → "Ангилал засах" + "Талбар засах" (дахин засах боломж)
  */
 export function buildComponentsFor(tx) {
-  const pending = tx.status === 'pending_review' || tx.category == null;
-  return pending ? buildButtonRows(tx.id, tx.is_pos === 1) : [buildEditRow(tx.id)];
+  return isPendingTxn(tx)
+    ? [...buildButtonRows(tx.id, tx.is_pos === 1), buildFieldRow(tx)]
+    : [buildEditRow(tx)];
 }
 
 /**

@@ -247,6 +247,7 @@ export default function App() {
               <Filters categories={categories} value={filters} onChange={setFilters} onReset={() => setFilters(emptyFilters)} />
               <TransactionTable
                 {...list}
+                categories={categories}
                 loading={loading}
                 onPage={off => setFilters(f => ({ ...f, offset: Math.max(0, off) }))}
               />

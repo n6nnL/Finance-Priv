@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { money, catLabel, catEmoji, catHex, hexTint, displayDesc } from '../lib/format.js';
 import { api } from '../lib/api.js';
+import { APPLY_TO_ALL_CONFIRM, detailFieldFor } from '../../../config/transactionActions.js';
 
 // Inline pending banner — shows at top of txn page
 export default function PendingReview({ items, total, categories, onConfirmed }) {
@@ -67,10 +68,12 @@ export default function PendingReview({ items, total, categories, onConfirmed })
 }
 
 function ConfirmModal({ t, categories, onClose, onSaved }) {
-  const isPos = t.is_pos === 1;
+  // POS→Газрын нэр / бусад→Шалтгаан — ялгааг дундын модуль шийднэ (bot-уудтай ижил)
+  const detail = detailFieldFor(t);
   const suggest = t.ai_suggested_category;
   const [cat, setCat] = useState(null);
-  const [note, setNote] = useState(t.note || '');
+  const [note, setNote] = useState(detail.current || '');
+  const [applyAll, setApplyAll] = useState(false); // ⚠️ default OFF — тодорхой сонгосон үед л override
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
 
@@ -78,8 +81,8 @@ function ConfirmModal({ t, categories, onClose, onSaved }) {
     if (!cat) return;
     setBusy(true); setErr('');
     try {
-      const extra = isPos ? { merchantPlace: note.trim() } : { note: note.trim() };
-      await api.patchCategory(t.id, { category: cat, applyToAll: true, ...extra });
+      const extra = note.trim() ? { [detail.apiField]: note.trim() } : {};
+      await api.patchCategory(t.id, { category: cat, applyToAll: applyAll, ...extra });
       onSaved(t, cat);
     } catch (e) {
       setErr(e.message || 'Алдаа гарлаа');
@@ -125,14 +128,15 @@ function ConfirmModal({ t, categories, onClose, onSaved }) {
             </div>
           </div>
 
-          {/* Note input */}
+          {/* Талбар — шошго/placeholder дундын модулиас (гурван клиент ижил) */}
           <label className="block text-[13px] font-medium text-[#6E665A] mb-[7px]">
-            {isPos ? 'Газрын нэр' : 'Юунд зарцуулсан бэ?'}
+            {detail.label}
           </label>
           <input
             value={note}
             onChange={e => setNote(e.target.value)}
-            placeholder={isPos ? 'ж: Тэнгис кино театр' : 'ж: Ээжийн сарын мөнгө'}
+            maxLength={detail.maxLength}
+            placeholder={detail.placeholder}
             className="w-full h-[48px] px-[15px] border-[1.5px] border-cream-input rounded-[13px] bg-white font-body text-[15px] text-[#2A2722] outline-none mb-[22px]"
           />
 
@@ -162,6 +166,20 @@ function ConfirmModal({ t, categories, onClose, onSaved }) {
               );
             })}
           </div>
+
+          {/* applyToAll — default OFF, тодорхой баталгаажуулалт (bot-уудтай ижил утга) */}
+          <label className="flex items-start gap-[10px] mb-[20px] cursor-pointer">
+            <input
+              type="checkbox"
+              checked={applyAll}
+              onChange={e => setApplyAll(e.target.checked)}
+              className="mt-[2px] w-[18px] h-[18px] shrink-0 accent-[#1F7A6B]"
+            />
+            <span className="min-w-0">
+              <span className="block text-[13.5px] font-semibold text-[#4A453D]">{APPLY_TO_ALL_CONFIRM.question}</span>
+              <span className="block text-[13px] text-[#A39A8A] mt-[2px]">{APPLY_TO_ALL_CONFIRM.hint}</span>
+            </span>
+          </label>
 
           {err && <div className="text-[#D8483B] text-[13px] mb-[12px]">{err}</div>}
 

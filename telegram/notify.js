@@ -3,7 +3,8 @@
 // ============================================================
 
 import { Markup } from 'telegraf';
-import { CATEGORIES, encodeButtonId, encodeEditButtonId } from './categories.js';
+import { CATEGORIES, encodeButtonId, encodeEditButtonId, encodeFieldButtonId } from './categories.js';
+import { isPendingTxn, detailFieldFor } from '../config/transactionActions.js';
 
 export function fmtMoney(n) {
   if (n == null) return '-';
@@ -23,7 +24,7 @@ export function displayName(tx) {
 /** Гүйлгээний мессежийн текст (Discord embed-ийн текст хувилбар). */
 export function buildText(tx) {
   const isIncome = tx.type === 'income';
-  const pending = tx.status === 'pending_review' || tx.category == null;
+  const pending = isPendingTxn(tx);
   const sign = isIncome ? '+' : '-';
   const lines = [
     `${pending ? '❓' : (isIncome ? '💰' : '🧾')} *${sign}${fmtMoney(tx.amount)}*  ·  ${displayName(tx)}`,
@@ -37,27 +38,49 @@ export function buildText(tx) {
   return lines.join('\n');
 }
 
-/** 10 ангиллын товчлуурууд (2 эгнээ × 5) */
-export function buildCategoryKeyboard(txnId, isPos) {
+/**
+ * 10 ангиллын товчлуурууд (2 эгнээ × 5).
+ * kind='c' → pending баталгаажуулалт; kind='ec' → classified мөрийн засвар
+ * (stale-check-гүй урсгал — bot.js-ийн handler ялгаж боловсруулна).
+ */
+export function buildCategoryKeyboard(txnId, isPos, kind = 'c') {
   const rows = [];
   for (let r = 0; r < Math.ceil(CATEGORIES.length / 5); r++) {
     const row = [];
     for (let i = r * 5; i < Math.min((r + 1) * 5, CATEGORIES.length); i++) {
-      row.push(Markup.button.callback(CATEGORIES[i], encodeButtonId(txnId, i, isPos)));
+      row.push(Markup.button.callback(CATEGORIES[i], encodeButtonId(txnId, i, isPos, kind)));
     }
     rows.push(row);
   }
   return Markup.inlineKeyboard(rows);
 }
 
-export function buildEditKeyboard(txnId) {
-  return Markup.inlineKeyboard([[Markup.button.callback('✏️ Ангилал засах', encodeEditButtonId(txnId))]]);
+/** "Талбар засах" товчны мөр — шошго дундын модулиас (POS→Газрын нэр / бусад→Шалтгаан). */
+function fieldButtonRow(tx) {
+  const detail = detailFieldFor(tx);
+  return [Markup.button.callback(`📝 ${detail.label} засах`, encodeFieldButtonId(tx.id))];
 }
 
-/** Гүйлгээний төлөвт тохирох keyboard (pending → ангиллын товч, classified → засах товч). */
+/** Classified мөр: ангилал дахин засах + талбар засах. */
+export function buildEditKeyboard(tx) {
+  return Markup.inlineKeyboard([
+    [Markup.button.callback('✏️ Ангилал засах', encodeEditButtonId(tx.id))],
+    fieldButtonRow(tx),
+  ]);
+}
+
+/**
+ * Гүйлгээний төлөвт тохирох keyboard:
+ *  - pending    → ангиллын товчнууд + талбар засах (капабилити гурван client ижил)
+ *  - classified → ангилал засах + талбар засах
+ */
 export function keyboardFor(tx) {
-  const pending = tx.status === 'pending_review' || tx.category == null;
-  return pending ? buildCategoryKeyboard(tx.id, tx.is_pos === 1) : buildEditKeyboard(tx.id);
+  if (isPendingTxn(tx)) {
+    const kb = buildCategoryKeyboard(tx.id, tx.is_pos === 1);
+    kb.reply_markup.inline_keyboard.push(fieldButtonRow(tx));
+    return kb;
+  }
+  return buildEditKeyboard(tx);
 }
 
 export default { buildText, keyboardFor, buildCategoryKeyboard, buildEditKeyboard, fmtMoney, fmtDate, displayName };

@@ -185,8 +185,10 @@ export function createTransactionsRouter({ db, ai }) {
       const row = db.getById(req.userId, id);
       if (!row) return res.status(404).json({ status: 'error', error: 'Гүйлгээ олдсонгүй' });
 
-      // Газрын нэр эсвэл note өгвөл мерчантынх тул applyToAll шиг сурна
-      const learn = !!applyToAll || !!merchantPlace || !!note;
+      // ⚠️ Override (сурах) нь ЗӨВХӨН хэрэглэгч applyToAll-ыг ТОДОРХОЙ сонгосон
+      // үед. Газрын нэр/шалтгаан дангаараа сурахад ХҮРГЭХГҮЙ — тэдгээр нь
+      // learn=false үед доорх updateCategoryById-ээр тухайн ГАНЦ мөрөнд хадгална.
+      const learn = !!applyToAll;
       const extra = { note: note || null, merchantPlace: merchantPlace || null };
 
       let updated = 1;
@@ -207,16 +209,26 @@ export function createTransactionsRouter({ db, ai }) {
     }
   });
 
-  // ---- PATCH /api/transactions/:id/note — зөвхөн тэмдэглэл засах (inline) ----
+  // ---- PATCH /api/transactions/:id/note — тэмдэглэл/газрын нэр засах (ангилал хөндөхгүй) ----
+  // Body: { note?, merchantPlace? } — body-д БАЙГАА талбарыг л шинэчилнэ;
+  // тодорхой хоосон string → NULL (утга устгах боломж). Override үүсгэхгүй.
   router.patch('/:id/note', (req, res) => {
     try {
       const id = Number(req.params.id);
       if (!Number.isInteger(id)) return res.status(400).json({ status: 'error', error: 'буруу id' });
       const row = db.getById(req.userId, id);
       if (!row) return res.status(404).json({ status: 'error', error: 'Гүйлгээ олдсонгүй' });
-      const note = (req.body?.note ?? '').toString();
-      db.updateNote(req.userId, id, note);
-      return res.status(200).json({ status: 'ok', id, note: note.trim() || null });
+      const body = req.body || {};
+      const has = (k) => Object.prototype.hasOwnProperty.call(body, k);
+      if (!has('note') && !has('merchantPlace')) {
+        return res.status(400).json({ status: 'error', error: 'note эсвэл merchantPlace шаардлагатай' });
+      }
+      const fields = {};
+      if (has('note')) fields.note = (body.note ?? '').toString();
+      if (has('merchantPlace')) fields.merchantPlace = (body.merchantPlace ?? '').toString();
+      db.updateTransactionFields(req.userId, id, fields);
+      const updated = db.getById(req.userId, id);
+      return res.status(200).json({ status: 'ok', id, note: updated.note, merchantPlace: updated.merchant_place });
     } catch (err) {
       logger.error('PATCH note алдаа', { err: err?.message });
       return res.status(500).json({ status: 'error', error: 'Internal Server Error' });

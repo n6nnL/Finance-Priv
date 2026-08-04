@@ -68,12 +68,32 @@ test('PATCH applyToAll → бүх мөр + override', async () => {
   assert.equal(db.getByMessageId(OWNER, `<m${mid}>`).category, 'Гадуур хооллолт');
 });
 
-test('POS баталгаажуулалт: merchantPlace → row.merchant_place', async () => {
+test('POS баталгаажуулалт: applyToAll + merchantPlace → override.friendly_name', async () => {
   await post('/api/transactions', tx({ description: '0930 QQPLACEBOM' }));
   const row = db.getByMessageId(OWNER, `<m${mid}>`);
-  const r = await patch(`/api/transactions/${row.id}/category`, { category: 'Гадуур хооллолт', merchantPlace: 'Шулуун дун' });
+  const r = await patch(`/api/transactions/${row.id}/category`, { category: 'Гадуур хооллолт', applyToAll: true, merchantPlace: 'Шулуун дун' });
   assert.equal((await r.json()).override.friendly_name, 'Шулуун дун');
   assert.equal(db.getById(OWNER, row.id).merchant_place, 'Шулуун дун');
+});
+
+test('applyToAll-ГҮЙ merchantPlace/note → override ҮҮСЭХГҮЙ, зөвхөн ГАНЦ мөр', async () => {
+  await post('/api/transactions', tx({ description: '0930 QQSOLOBOM' }));
+  const firstId = db.getByMessageId(OWNER, `<m${mid}>`).id;
+  await post('/api/transactions', tx({ description: '0047 QQSOLOBOM' })); // ижил мерчантын 2-р мөр
+  const siblingId = db.getByMessageId(OWNER, `<m${mid}>`).id;
+
+  const r = await patch(`/api/transactions/${firstId}/category`, { category: 'Гадуур хооллолт', merchantPlace: 'Ганц газар' });
+  const j = await r.json();
+  assert.equal(j.override, null); // сураагүй
+  assert.equal(j.updated, 1);
+  // Ганц мөрөнд хадгалагдсан, ижил мерчантын нөгөө мөр ХӨНДӨГДӨӨГҮЙ
+  assert.equal(db.getById(OWNER, firstId).category, 'Гадуур хооллолт');
+  assert.equal(db.getById(OWNER, firstId).merchant_place, 'Ганц газар');
+  assert.equal(db.getById(OWNER, siblingId).category, null);
+  assert.equal(db.getById(OWNER, siblingId).merchant_place, null);
+  // Дараагийн ижил мерчант АВТОМАТААР ангилагдахгүй (override байхгүй)
+  await post('/api/transactions', tx({ description: '5253 QQSOLOBOM' }));
+  assert.equal(db.getByMessageId(OWNER, `<m${mid}>`).category, null);
 });
 
 test('PATCH /:id/note → тэмдэглэл', async () => {
@@ -81,6 +101,32 @@ test('PATCH /:id/note → тэмдэглэл', async () => {
   const row = db.getByMessageId(OWNER, `<m${mid}>`);
   await patch(`/api/transactions/${row.id}/note`, { note: 'Тест' });
   assert.equal(db.getById(OWNER, row.id).note, 'Тест');
+});
+
+test('PATCH /:id/note: байгаа талбарыг Л шинэчилнэ; хоосон string → NULL; хоосон body → 400', async () => {
+  await post('/api/transactions', tx({ description: '0930 QQFIELDBOM' }));
+  const row = db.getByMessageId(OWNER, `<m${mid}>`);
+
+  // merchantPlace дангаар → merchant_place шинэчлэгдэнэ, note хөндөгдөхгүй
+  await patch(`/api/transactions/${row.id}/note`, { note: 'анхны тэмдэглэл' });
+  const r1 = await patch(`/api/transactions/${row.id}/note`, { merchantPlace: 'Тэнгис' });
+  const j1 = await r1.json();
+  assert.equal(j1.merchantPlace, 'Тэнгис');
+  assert.equal(j1.note, 'анхны тэмдэглэл'); // note body-д байгаагүй → хэвээр
+  assert.equal(db.getById(OWNER, row.id).merchant_place, 'Тэнгис');
+  assert.equal(db.getById(OWNER, row.id).note, 'анхны тэмдэглэл');
+
+  // Тодорхой хоосон string → NULL (утга устгах боломж)
+  await patch(`/api/transactions/${row.id}/note`, { merchantPlace: '' });
+  assert.equal(db.getById(OWNER, row.id).merchant_place, null);
+  assert.equal(db.getById(OWNER, row.id).note, 'анхны тэмдэглэл'); // note хэвээр
+
+  // Ангилал/status-д ОГТ нөлөөлөөгүй (дан талбарын засвар)
+  assert.equal(db.getById(OWNER, row.id).status, 'pending_review');
+
+  // Хоёулаа байхгүй → 400
+  const r400 = await patch(`/api/transactions/${row.id}/note`, {});
+  assert.equal(r400.status, 400);
 });
 
 test('GET /api/summary + /monthly + /categories', async () => {

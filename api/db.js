@@ -631,9 +631,16 @@ export function createDb(dbPath, opts = {}) {
     return ids.length;
   }
 
-  const _updateNote = db.prepare('UPDATE transactions SET note=@note WHERE id=@id AND user_id=@user_id');
-  function updateNote(userId, id, note) {
-    return _updateNote.run({ id, user_id: userId, note: note && String(note).trim() ? String(note).trim() : null }).changes;
+  // Тэмдэглэл/газрын нэрийг ангилал ХӨНДӨЛГҮЙ засах. undefined талбарт ГАР
+  // ХҮРЭХГҮЙ; өгсөн талбарын хоосон string → NULL (утга УСТГАХ боломж).
+  // ⚠️ override/manually_edited-д нөлөөлөхгүй — энэ бол дан талбарын засвар.
+  function updateTransactionFields(userId, id, { note, merchantPlace } = {}) {
+    const sets = [];
+    const params = { id, user_id: userId };
+    if (note !== undefined) { sets.push('note=@note'); params.note = String(note).trim() || null; }
+    if (merchantPlace !== undefined) { sets.push('merchant_place=@place'); params.place = String(merchantPlace).trim() || null; }
+    if (!sets.length) return 0;
+    return db.prepare(`UPDATE transactions SET ${sets.join(', ')} WHERE id=@id AND user_id=@user_id`).run(params).changes;
   }
 
   // Хуучирсан pending_review → автоматаар DEFAULT_CATEGORY ('Бусад'). Хэрэглэгчийн
@@ -977,7 +984,7 @@ export function createDb(dbPath, opts = {}) {
     insertTransaction, getByMessageId, getById, getCurrentBalance, getBalanceAnchor, getDailyTxnStats,
     getDailyTransactionRows,
     listTransactions, getSummary,
-    getMonthly, getByCategory, getCycleSpend, getPending, updateCategoryById, updateCategoryByPattern, updateNote,
+    getMonthly, getByCategory, getCycleSpend, getPending, updateCategoryById, updateCategoryByPattern, updateTransactionFields,
     autoClassifyStalePending,
     // real-time tracker: %-хуваарилалт
     getBudgetAllocations, saveBudgetAllocations,

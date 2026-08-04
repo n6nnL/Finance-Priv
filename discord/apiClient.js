@@ -38,14 +38,23 @@ async function req(path, { method = 'GET', body } = {}, retries = 3) {
 }
 
 /**
- * Гүйлгээ ангилах (баталгаажуулах). applyToAll=true → тэр мерчантын бүгдэд +
- * learned override. POS бол merchantPlace, бусад бол note.
+ * Гүйлгээ ангилах (баталгаажуулах). ⚠️ applyToAll default OFF — зөвхөн
+ * хэрэглэгч баталгаажуулалтад "Тийм" гэсэн үед true (санамсаргүй override үгүй).
+ * POS бол merchantPlace, бусад бол note.
  */
-export function patchCategory(id, { category, applyToAll = true, merchantPlace, note }) {
+export function patchCategory(id, { category, applyToAll = false, merchantPlace, note }) {
   return req(`/api/transactions/${id}/category`, {
     method: 'PATCH',
     body: { category, applyToAll, merchantPlace: merchantPlace || undefined, note: note || undefined },
   });
+}
+
+/**
+ * Тэмдэглэл/газрын нэр — ангилал хөндөхгүй, override үүсгэхгүй.
+ * fields = { note } ЭСВЭЛ { merchantPlace }; '' → NULL (утга устгана).
+ */
+export function updateFields(id, fields) {
+  return req(`/api/transactions/${id}/note`, { method: 'PATCH', body: fields });
 }
 
 /**
@@ -62,4 +71,4 @@ export async function getTransaction(id) {
   }
 }
 
-export default { patchCategory, getTransaction };
+export default { patchCategory, updateFields, getTransaction };

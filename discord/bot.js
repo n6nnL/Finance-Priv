@@ -11,14 +11,18 @@
 
 import {
   Client, GatewayIntentBits, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder,
-  StringSelectMenuBuilder, StringSelectMenuOptionBuilder,
+  StringSelectMenuBuilder, StringSelectMenuOptionBuilder, ButtonBuilder, ButtonStyle,
 } from 'discord.js';
 import { DatabaseSync } from 'node:sqlite';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { config } from './config.js';
-import { CATEGORIES, categoryByIndex, encodeModalId, encodeCatSelectId, parseId } from './categories.js';
+import {
+  CATEGORIES, categoryByIndex, encodeModalId, encodeCatSelectId, encodeFieldModalId,
+  encodeApplyAllId, parseId,
+} from './categories.js';
 import { sendNotification, buildEmbed, buildComponentsFor } from './notify.js';
-import { patchCategory, getTransaction } from './apiClient.js';
+import { patchCategory, updateFields, getTransaction } from './apiClient.js';
+import { APPLY_TO_ALL_CONFIRM, detailFieldFor } from '../config/transactionActions.js';
 
 // --- DB (read-only polling) — зөвхөн шинэ гүйлгээ ИЛРҮҮЛЭХЭД ашиглана.
 //     Interaction үеийн төлөв шалгалт/бичилт нь API-аар явна (write нь
@@ -108,6 +112,22 @@ async function refreshStaleMessage(messageId, row) {
   } catch { /* мессеж засаж чадахгүй ч interaction-г унагаахгүй */ }
 }
 
+// --- applyToAll баталгаажуулалтын түр төлөв ---
+// customId 100 тэмдэгтэд утга (ангилал+текст) багтахгүй тул энд хадгална.
+// txnId → { category, extra, messageId }. Restart-д алдагдвал товч дарахад
+// "хугацаа дууссан" гэж эелдэг хариулна (эрсдэлгүй).
+const pendingConfirm = new Map();
+
+/** applyToAll Тийм/Үгүй товчны эгнээ (текст нь дундын модулиас). */
+function applyAllButtons(txnId) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(encodeApplyAllId(txnId, true))
+      .setLabel(APPLY_TO_ALL_CONFIRM.yesLabel).setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(encodeApplyAllId(txnId, false))
+      .setLabel(APPLY_TO_ALL_CONFIRM.noLabel).setStyle(ButtonStyle.Secondary)
+  );
+}
+
 /** Засварын ангилал select — одоогийн ангиллыг default болгож харуулна. */
 function buildCategorySelect(txnId, originMessageId, currentCategory) {
   const menu = new StringSelectMenuBuilder()
@@ -151,6 +171,58 @@ client.on('interactionCreate', async (interaction) => {
         return;
       }
 
+      // --- "Талбар засах" товч (📝 — ангилал хөндөхгүй, POS/энгийн модуль шийднэ) ---
+      if (p.kind === 'n') {
+        let current = null;
+        try { current = await getTransaction(p.txnId); } catch { current = null; }
+        if (!current) {
+          await interaction.reply({ content: '⚠️ Энэ гүйлгээ олдсонгүй (устсан байж магадгүй).', ephemeral: true });
+          return;
+        }
+        const detail = detailFieldFor(current);
+        const modal = new ModalBuilder()
+          .setCustomId(encodeFieldModalId(p.txnId, interaction.message.id))
+          .setTitle(`${detail.label} засах`);
+        const input = new TextInputBuilder()
+          .setCustomId('value')
+          .setLabel(detail.question)
+          .setPlaceholder(detail.placeholder)
+          .setStyle(TextInputStyle.Short)
+          .setRequired(false) // хоосон submit = утга устгах
+          .setMaxLength(detail.maxLength);
+        if (detail.current) input.setValue(String(detail.current).slice(0, detail.maxLength));
+        modal.addComponents(new ActionRowBuilder().addComponents(input));
+        await interaction.showModal(modal);
+        return;
+      }
+
+      // --- applyToAll Тийм/Үгүй (баталгаажуулалтын товч, ephemeral мессежид) ---
+      if (p.kind === 'ay' || p.kind === 'an') {
+        await interaction.deferUpdate();
+        const st = pendingConfirm.get(p.txnId);
+        if (!st) {
+          await interaction.editReply({ content: '⚠️ Хугацаа дууссан. Дахин оролдоно уу.', components: [] });
+          return;
+        }
+        pendingConfirm.delete(p.txnId);
+        const applyToAll = p.kind === 'ay';
+        try {
+          const r = await patchCategory(p.txnId, { category: st.category, applyToAll, ...st.extra });
+          const updated = await getTransaction(p.txnId).catch(() => null);
+          if (st.messageId && updated) await refreshStaleMessage(st.messageId, updated);
+          const tail = applyToAll ? ' Цаашид энэ мерчант автоматаар ийм ангилалтай болно.' : '';
+          await interaction.editReply({
+            content: `✅ **${st.category}** болгож хадгаллаа${r.updated > 1 ? ` (${r.updated} гүйлгээнд)` : ''}.${tail}`,
+            components: [],
+          });
+          log('info', `ангилагдлаа id=${p.txnId} → ${st.category}`, `applyToAll=${applyToAll} updated=${r.updated}`);
+        } catch (e) {
+          log('error', `PATCH алдаа id=${p.txnId}`, e.message);
+          await interaction.editReply({ content: '❌ Хадгалахад алдаа гарлаа. Дахин оролдоно уу.', components: [] });
+        }
+        return;
+      }
+
       // --- pending ангиллын товч (Prompt 2) ---
       if (p.kind !== 'c') return;
       const cat = categoryByIndex(p.catIdx);
@@ -173,17 +245,18 @@ client.on('interactionCreate', async (interaction) => {
         return;
       }
 
-      // POS бол "Ямар газар?", шилжүүлэг бол "Юунд?"
+      // Асуулт/жишээ дундын модулиас — POS бол Газрын нэр, бусад бол Шалтгаан
+      const detail = detailFieldFor({ is_pos: p.isPos ? 1 : 0 });
       const modal = new ModalBuilder()
         .setCustomId(encodeModalId(p.txnId, p.catIdx, p.isPos, interaction.message.id))
         .setTitle(`${cat} болгох`);
       const input = new TextInputBuilder()
         .setCustomId('value')
-        .setLabel(p.isPos ? 'Ямар газар?' : 'Юунд?')
-        .setPlaceholder(p.isPos ? 'жишээ: Шулуун дун' : 'жишээ: Ээжид сарын мөнгө')
+        .setLabel(detail.question)
+        .setPlaceholder(detail.placeholder)
         .setStyle(TextInputStyle.Short)
         .setRequired(false)
-        .setMaxLength(200);
+        .setMaxLength(detail.maxLength);
       modal.addComponents(new ActionRowBuilder().addComponents(input));
       await interaction.showModal(modal);
       return;
@@ -210,27 +283,45 @@ client.on('interactionCreate', async (interaction) => {
         await interaction.editReply({ content: `✓ Аль хэдийн **${chosen}** байна. Өөрчлөлтгүй.`, components: [] });
         return;
       }
-      try {
-        // Категорийн өөрчлөлт нь Dashboard-тай ИЖИЛ /category endpoint-оор:
-        // applyToAll → learned override шинэчлэх + manually_edited=1 (API талд).
-        const r = await patchCategory(p.txnId, { category: chosen, applyToAll: true });
-        const updated = await getTransaction(p.txnId).catch(() => null);
-        if (p.messageId && updated) await refreshStaleMessage(p.messageId, updated);
-        await interaction.editReply({
-          content: `✅ **${chosen}** болгож өөрчиллөө${r.updated > 1 ? ` (${r.updated} гүйлгээнд)` : ''}.`,
-          components: [],
-        });
-        log('info', `Discord-оор ангилал засав id=${p.txnId} → ${chosen}`, `updated=${r.updated}`);
-      } catch (e) {
-        log('error', `ангилал засах алдаа id=${p.txnId}`, e.message);
-        await interaction.editReply({ content: '❌ Засахад алдаа гарлаа. Дахин оролдоно уу.', components: [] });
-      }
+      // Шууд бичихгүй — эхлээд applyToAll баталгаажуулалт (default = Үгүй).
+      // Бичилт нь 'ay'/'an' товчны handler-т Dashboard-тай ИЖИЛ /category-оор.
+      pendingConfirm.set(p.txnId, { category: chosen, extra: {}, messageId: p.messageId });
+      await interaction.editReply({
+        content: `**${chosen}** болгож өөрчилнө.\n${APPLY_TO_ALL_CONFIRM.question}\n*${APPLY_TO_ALL_CONFIRM.hint}*`,
+        components: [applyAllButtons(p.txnId)],
+      });
       return;
     }
 
     if (interaction.isModalSubmit()) {
       const p = parseId(interaction.customId);
-      if (!p || p.kind !== 'm') return;
+      if (!p) return;
+
+      // --- Талбарын modal ('nm') — ангилал хөндөхгүй, PATCH /note-оор ---
+      if (p.kind === 'nm') {
+        await interaction.deferReply({ ephemeral: true });
+        let current = null;
+        try { current = await getTransaction(p.txnId); } catch { current = null; }
+        if (!current) {
+          await interaction.editReply('⚠️ Энэ гүйлгээ олдсонгүй (устсан байж магадгүй).');
+          return;
+        }
+        const detail = detailFieldFor(current);
+        const value = (interaction.fields.getTextInputValue('value') || '').trim();
+        try {
+          await updateFields(p.txnId, { [detail.apiField]: value }); // '' → NULL (устгана)
+          const updated = await getTransaction(p.txnId).catch(() => null);
+          if (p.messageId && updated) await refreshStaleMessage(p.messageId, updated);
+          await interaction.editReply(value ? `✅ ${detail.label} хадгалагдлаа.` : `✅ ${detail.label} устгагдлаа.`);
+          log('info', `талбар засав id=${p.txnId}`, `field=${detail.apiField}`);
+        } catch (e) {
+          log('error', `updateFields алдаа id=${p.txnId}`, e.message);
+          await interaction.editReply('❌ Хадгалахад алдаа гарлаа. Дахин оролдоно уу.');
+        }
+        return;
+      }
+
+      if (p.kind !== 'm') return;
       // ⚠️ API бичихээс ӨМНӨ заавал ack (3с дотор) — "interaction failed"-аас сэргийлнэ.
       await interaction.deferReply({ ephemeral: true });
       const cat = categoryByIndex(p.catIdx);
@@ -251,21 +342,16 @@ client.on('interactionCreate', async (interaction) => {
       }
 
       const value = (interaction.fields.getTextInputValue('value') || '').trim();
-      const extra = p.isPos ? { merchantPlace: value } : { note: value };
+      // Талбарын түлхүүрийг модулиас (client өөрөө merchantPlace/note шийдэхгүй)
+      const extra = value ? { [detailFieldFor({ is_pos: p.isPos ? 1 : 0 }).apiField]: value } : {};
 
-      try {
-        // applyToAll → тэр мерчантын бүгдэд + learned override + manually_edited=1
-        // (API талд). Бүх бичилт API-аар → Dashboard-той нийцтэй.
-        const r = await patchCategory(p.txnId, { category: cat, applyToAll: true, ...extra });
-        // Шинэчилсэн төлөвийг API-аас уншиж мессежийг classified болгоно.
-        const updated = await getTransaction(p.txnId).catch(() => null);
-        if (p.messageId && updated) await refreshStaleMessage(p.messageId, updated);
-        await interaction.editReply(`✅ **${cat}** болгож хадгаллаа${r.updated > 1 ? ` (${r.updated} гүйлгээнд)` : ''}.`);
-        log('info', `ангилагдлаа id=${p.txnId} → ${cat}`, `updated=${r.updated}`);
-      } catch (e) {
-        log('error', `PATCH алдаа id=${p.txnId}`, e.message);
-        await interaction.editReply('❌ Хадгалахад алдаа гарлаа. Дахин оролдоно уу.');
-      }
+      // Шууд бичихгүй — applyToAll баталгаажуулалт (default = Үгүй). Бичилт нь
+      // 'ay'/'an' handler-т: applyToAll → бүгдэд + learned override (API талд).
+      pendingConfirm.set(p.txnId, { category: cat, extra, messageId: p.messageId });
+      await interaction.editReply({
+        content: `**${cat}**${value ? ` · ${value}` : ''} болгож хадгална.\n${APPLY_TO_ALL_CONFIRM.question}\n*${APPLY_TO_ALL_CONFIRM.hint}*`,
+        components: [applyAllButtons(p.txnId)],
+      });
     }
   } catch (e) {
     log('error', 'interaction алдаа', e.message);

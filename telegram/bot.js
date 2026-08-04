@@ -3,8 +3,11 @@
 //
 //  - DB-г polling хийж холбогдсон хэрэглэгч бүрийн шинэ гүйлгээг илрүүлнэ
 //    (Discord bot-той ижил загвар, зөвхөн олон хэрэглэгчид JOIN нэмэгдсэн).
-//  - Ангилах: товч → (POS:Газрын нэр / бусад:Шалтгаан) дараагийн текст
-//    мессеж → PATCH /api/.../category (Bearer JWT, applyToAll) → edit.
+//  - Ангилах: товч → (POS:Газрын нэр / бусад:Шалтгаан — config/
+//    transactionActions.js шийднэ) текст хариу → applyToAll баталгаажуулалт
+//    (Тийм/Үгүй, default OFF) → PATCH /api/.../category (Bearer JWT) → edit.
+//  - Талбар засах: "📝 ..." товч → текст хариу → PATCH /api/.../note
+//    (ангилал/override хөндөхгүй).
 //  - Linking: /link <код> — dashboard-аас үүсгэсэн нэг удаагийн код.
 //  - ⚠️ Холбоогүй chat_id-д bot ЮУ Ч илгээхгүй/ангилуулахгүй (эрх шалгалт
 //    эхний check байдлаар бичигдсэн, requireLinked() бүх handler-т).
@@ -16,9 +19,10 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { config } from './config.js';
 import { createTelegramStore } from './db.js';
 import { mintAccessToken } from './jwtAuth.js';
-import { patchCategory, getTransaction } from './apiClient.js';
-import { categoryByIndex, parseId } from './categories.js';
+import { patchCategory, updateFields, getTransaction } from './apiClient.js';
+import { categoryByIndex, parseId, encodeApplyAllId, encodeSkipId } from './categories.js';
 import { buildText, keyboardFor, buildCategoryKeyboard } from './notify.js';
+import { APPLY_TO_ALL_CONFIRM, detailFieldFor } from '../config/transactionActions.js';
 
 function log(level, msg, extra) {
   console.log(JSON.stringify({ t: new Date().toISOString(), level, msg, ...(extra ? { extra } : {}) }));
@@ -34,8 +38,12 @@ const bot = new Telegraf(config.botToken, {
   telegram: { agent: new HttpsAgent({ family: 4, keepAlive: true, keepAliveMsecs: 10000 }) },
 });
 
-// --- pending follow-up асуулт (POS газар / шилжүүлгийн шалтгаан) ---
-// chatId → { txnId, catIdx, isPos, chatId, messageId }
+// --- pending follow-up төлөв (chat бүрд нэг) ---
+// chatId → { mode, txnId, ... }:
+//   mode:'detail'  — ангилал сонгосны дараах талбарын текст хүлээж байна
+//                    { catIdx, isPos, chatId, messageId }
+//   mode:'confirm' — applyToAll Тийм/Үгүй товч хүлээж байна (+ value)
+//   mode:'field'   — дан талбарын засварын текст хүлээж байна { apiField }
 const pending = new Map();
 
 function loadState() {
@@ -159,18 +167,30 @@ async function refreshMessage(chatId, messageId, tx) {
   } catch { /* мессеж засаж чадахгүй ч урсгалыг унагаахгүй */ }
 }
 
-async function applyCategory(ctx, userId, txnId, category, extra, originChatId, originMessageId) {
+async function applyCategory(ctx, userId, txnId, category, extra, applyToAll, originChatId, originMessageId) {
   const token = mintAccessToken(store.getUserBasic(userId));
   try {
-    const r = await patchCategory(token, txnId, { category, applyToAll: true, ...extra });
+    // applyToAll = зөвхөн хэрэглэгч "Тийм" гэж баталгаажуулсан үед true
+    const r = await patchCategory(token, txnId, { category, applyToAll, ...extra });
     const updated = await getTransaction(token, txnId).catch(() => null);
     if (updated) await refreshMessage(originChatId, originMessageId, updated);
-    await ctx.reply(`✅ *${category}* болгож хадгаллаа${r.updated > 1 ? ` (${r.updated} гүйлгээнд)` : ''}.`, { parse_mode: 'Markdown' });
-    log('info', `ангилагдлаа txn=${txnId} → ${category}`, `updated=${r.updated}`);
+    const tail = applyToAll ? ' Цаашид энэ мерчант автоматаар ийм ангилалтай болно.' : '';
+    await ctx.reply(`✅ *${category}* болгож хадгаллаа${r.updated > 1 ? ` (${r.updated} гүйлгээнд)` : ''}.${tail}`, { parse_mode: 'Markdown' });
+    log('info', `ангилагдлаа txn=${txnId} → ${category}`, `applyToAll=${applyToAll} updated=${r.updated}`);
   } catch (e) {
     log('error', `PATCH алдаа txn=${txnId}`, e.message);
     await ctx.reply('❌ Хадгалахад алдаа гарлаа. Дахин оролдоно уу.');
   }
+}
+
+/** Ангилал+талбар цугласны дараах applyToAll баталгаажуулалт (default = Үгүй товч). */
+async function askApplyToAll(ctx, st) {
+  pending.set(ctx.chat.id, { ...st, mode: 'confirm' });
+  await ctx.reply(`${APPLY_TO_ALL_CONFIRM.question}\n${APPLY_TO_ALL_CONFIRM.hint}`,
+    Markup.inlineKeyboard([[
+      Markup.button.callback(APPLY_TO_ALL_CONFIRM.yesLabel, encodeApplyAllId(st.txnId, true)),
+      Markup.button.callback(APPLY_TO_ALL_CONFIRM.noLabel, encodeApplyAllId(st.txnId, false)),
+    ]]));
 }
 
 bot.on('callback_query', async (ctx) => {
@@ -187,30 +207,65 @@ bot.on('callback_query', async (ctx) => {
     const originMessageId = ctx.callbackQuery.message?.message_id;
 
     // --- "Ангилал засах" (аль хэдийн бүртгэгдсэн) → ангиллын товчнуудыг дахин харуулна ---
+    // 'ec' kind — доорх handler нь stale-check хийхгүй (classified засах нь хэвийн).
     if (p.kind === 'e') {
       await ctx.answerCbQuery();
       const current = await getTransaction(token, p.txnId);
       if (!current) { await ctx.reply('⚠️ Энэ гүйлгээ олдсонгүй.'); return; }
       await ctx.reply(`Одоогийн ангилал: *${current.category || '(ангилаагүй)'}*\nШинэ ангилал сонгоно уу:`, {
         parse_mode: 'Markdown',
-        ...buildCategoryKeyboard(p.txnId, current.is_pos === 1),
+        ...buildCategoryKeyboard(p.txnId, current.is_pos === 1, 'ec'),
       });
       return;
     }
 
-    // --- "Алгасах" (follow-up асуулт алгасах) ---
+    // --- "Талбар засах" (📝 Газрын нэр/Шалтгаан — ангилал хөндөхгүй) ---
+    if (p.kind === 'n') {
+      await ctx.answerCbQuery();
+      const current = await getTransaction(token, p.txnId);
+      if (!current) { await ctx.reply('⚠️ Энэ гүйлгээ олдсонгүй.'); return; }
+      const detail = detailFieldFor(current); // POS/энгийн ялгааг модуль шийднэ
+      pending.set(ctx.chat.id, {
+        mode: 'field', txnId: p.txnId, apiField: detail.apiField,
+        chatId: originChatId, messageId: originMessageId,
+      });
+      const cur = detail.current ? `\nОдоогийн: ${detail.current}` : '';
+      await ctx.reply(`${detail.question} («-» гэвэл устгана)${cur}`,
+        Markup.inlineKeyboard([[Markup.button.callback('Болих', encodeSkipId(p.txnId))]]));
+      return;
+    }
+
+    // --- "Алгасах/Болих" (follow-up товч) ---
     if (p.kind === 'sk') {
       await ctx.answerCbQuery();
       const st = pending.get(ctx.chat.id);
       if (!st || st.txnId !== p.txnId) return;
-      pending.delete(ctx.chat.id);
-      const cat = categoryByIndex(st.catIdx);
-      await applyCategory(ctx, userId, p.txnId, cat, {}, st.chatId, st.messageId);
+      if (st.mode === 'field') { // талбарын засвар болих — юу ч бичихгүй
+        pending.delete(ctx.chat.id);
+        await ctx.reply('Болилоо.');
+        return;
+      }
+      // classify-ийн талбар алгасах → утгагүйгээр applyToAll баталгаажуулалт руу
+      await askApplyToAll(ctx, { ...st, value: '' });
       return;
     }
 
-    // --- Ангиллын товч (pending гүйлгээ баталгаажуулах) ---
-    if (p.kind !== 'c') { await ctx.answerCbQuery(); return; }
+    // --- applyToAll Тийм/Үгүй (баталгаажуулалтын товч) ---
+    if (p.kind === 'ay' || p.kind === 'an') {
+      await ctx.answerCbQuery();
+      const st = pending.get(ctx.chat.id);
+      if (!st || st.mode !== 'confirm' || st.txnId !== p.txnId) return;
+      pending.delete(ctx.chat.id);
+      const cat = categoryByIndex(st.catIdx);
+      if (!cat) return;
+      // Талбарын түлхүүрийг модулиас (client өөрөө merchantPlace/note шийдэхгүй)
+      const extra = st.value ? { [detailFieldFor({ is_pos: st.isPos ? 1 : 0 }).apiField]: st.value } : {};
+      await applyCategory(ctx, userId, st.txnId, cat, extra, p.kind === 'ay', st.chatId, st.messageId);
+      return;
+    }
+
+    // --- Ангиллын товч ('c' = pending баталгаажуулах, 'ec' = classified засах) ---
+    if (p.kind !== 'c' && p.kind !== 'ec') { await ctx.answerCbQuery(); return; }
     const cat = categoryByIndex(p.catIdx);
     if (!cat) { await ctx.answerCbQuery(); return; }
 
@@ -220,34 +275,59 @@ bot.on('callback_query', async (ctx) => {
       await ctx.reply('⚠️ Энэ гүйлгээ олдсонгүй (устсан байж магадгүй, эсвэл танд хамаарахгүй).');
       return;
     }
-    if (current.status !== 'pending_review') {
+    // Stale-check ЗӨВХӨН pending мэдэгдлийн товчинд ('c') — dashboard-аар зэрэг
+    // шийдсэн race-ээс хамгаална. Засварын урсгалд ('ec') classified байх нь хэвийн.
+    if (p.kind === 'c' && current.status !== 'pending_review') {
       await ctx.answerCbQuery('Аль хэдийн шийдэгдсэн');
-      await ctx.reply(`✓ Энэ гүйлгээ аль хэдийн *${current.category || 'шийдэгдсэн'}* болсон байна.`, { parse_mode: 'Markdown' });
+      await ctx.reply(`✓ Энэ гүйлгээ аль хэдийн *${current.category || 'шийдэгдсэн'}* болсон байна. Дахин засах бол «✏️ Ангилал засах» товчийг ашиглана уу.`, { parse_mode: 'Markdown' });
       await refreshMessage(originChatId, originMessageId, current);
       return;
     }
 
     await ctx.answerCbQuery();
-    pending.set(ctx.chat.id, { txnId: p.txnId, catIdx: p.catIdx, isPos: p.isPos, chatId: originChatId, messageId: originMessageId });
-    const question = p.isPos ? 'Ямар газар вэ? (жишээ: Шулуун дун)' : 'Юунд зориулсан бэ? (жишээ: Ээжид сарын мөнгө)';
-    await ctx.reply(question, Markup.inlineKeyboard([[Markup.button.callback('Алгасах', `sk|${p.txnId}`)]]));
+    pending.set(ctx.chat.id, {
+      mode: 'detail', txnId: p.txnId, catIdx: p.catIdx, isPos: p.isPos,
+      chatId: originChatId, messageId: originMessageId,
+    });
+    // Асуулт/жишээ дундын модулиас — POS бол Газрын нэр, бусад бол Шалтгаан
+    const detail = detailFieldFor({ is_pos: p.isPos ? 1 : 0 });
+    await ctx.reply(`${detail.question} (${detail.placeholder})`,
+      Markup.inlineKeyboard([[Markup.button.callback('Алгасах', encodeSkipId(p.txnId))]]));
   } catch (e) {
     log('error', 'callback алдаа', e.message);
   }
 });
 
-// --- Follow-up текст хариулт (POS газар / шилжүүлгийн шалтгаан) ---
+// --- Follow-up текст хариулт (classify-ийн талбар ЭСВЭЛ дан талбарын засвар) ---
 bot.on('text', async (ctx, next) => {
   if (String(ctx.message.text || '').startsWith('/')) return next(); // командыг дараагийн handler-т
   const st = pending.get(ctx.chat.id);
-  if (!st) return; // hолбогдоогүй эсвэл хүлээж буй асуултгүй үед bot дуугүй (спам мэдэгдэл илгээхгүй)
+  if (!st) return; // холбогдоогүй эсвэл хүлээж буй асуултгүй үед bot дуугүй (спам мэдэгдэл илгээхгүй)
   const userId = store.resolveUserByChatId(ctx.chat.id);
   if (userId == null) return;
-  pending.delete(ctx.chat.id);
-  const cat = categoryByIndex(st.catIdx);
-  const value = String(ctx.message.text || '').trim().slice(0, 200);
-  const extra = st.isPos ? { merchantPlace: value } : { note: value };
-  await applyCategory(ctx, userId, st.txnId, cat, extra, st.chatId, st.messageId);
+  const raw = String(ctx.message.text || '').trim().slice(0, 200);
+
+  // Дан талбарын засвар: ангилал хөндөхгүй PATCH /note («-» → устгах)
+  if (st.mode === 'field') {
+    pending.delete(ctx.chat.id);
+    const value = raw === '-' ? '' : raw;
+    const token = mintAccessToken(store.getUserBasic(userId));
+    try {
+      await updateFields(token, st.txnId, { [st.apiField]: value });
+      const updated = await getTransaction(token, st.txnId).catch(() => null);
+      if (updated) await refreshMessage(st.chatId, st.messageId, updated);
+      await ctx.reply(value ? '✅ Хадгаллаа.' : '✅ Устгалаа.');
+      log('info', `талбар засав txn=${st.txnId}`, `field=${st.apiField}`);
+    } catch (e) {
+      log('error', `updateFields алдаа txn=${st.txnId}`, e.message);
+      await ctx.reply('❌ Хадгалахад алдаа гарлаа. Дахин оролдоно уу.');
+    }
+    return;
+  }
+
+  // Classify-ийн талбарын хариу → applyToAll баталгаажуулалт руу (шууд бичихгүй)
+  if (st.mode === 'confirm') return; // товчоор л хариулна — текстийг тоохгүй
+  await askApplyToAll(ctx, { ...st, value: raw });
 });
 
 bot.catch((err) => log('error', 'bot-level алдаа', err?.message ?? String(err)));

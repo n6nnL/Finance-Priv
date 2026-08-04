@@ -157,6 +157,11 @@ export const api = {
   patchCategory: (id, { category, applyToAll, merchantPlace, note }) =>
     req(`/api/transactions/${id}/category`, { method: 'PATCH', body: { category, applyToAll, merchantPlace: merchantPlace || undefined, note: note || undefined } }),
   updateNote: (id, note) => req(`/api/transactions/${id}/note`, { method: 'PATCH', body: { note } }),
+  // Тэмдэглэл/газрын нэр — ангилал хөндөхгүй, override үүсгэхгүй. Body-д
+  // БАЙГАА талбарыг л шинэчилнэ ('' → NULL = устгах); undefined түлхүүр
+  // JSON.stringify-д автоматаар алга болно.
+  updateFields: (id, { note, merchantPlace } = {}) =>
+    req(`/api/transactions/${id}/note`, { method: 'PATCH', body: { note, merchantPlace } }),
   // ---- Төсөв: тохиргоо + хувийн event ----
   getSettings: () => req('/api/settings'),
   saveSettings: (settings) => req('/api/settings', { method: 'PUT', body: settings }),

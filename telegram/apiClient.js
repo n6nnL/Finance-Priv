@@ -39,13 +39,25 @@ async function req(path, { method = 'GET', body, accessToken } = {}, retries = 3
   throw lastErr;
 }
 
-/** Гүйлгээ ангилах (баталгаажуулах). accessToken = тухайн хэрэглэгчид mint хийсэн JWT. */
-export function patchCategory(accessToken, id, { category, applyToAll = true, merchantPlace, note }) {
+/**
+ * Гүйлгээ ангилах (баталгаажуулах). accessToken = тухайн хэрэглэгчид mint хийсэн JWT.
+ * ⚠️ applyToAll default OFF — зөвхөн хэрэглэгч баталгаажуулалтад "Тийм" гэсэн
+ * үед л true дамжина (learned override санамсаргүй үүсэхгүй).
+ */
+export function patchCategory(accessToken, id, { category, applyToAll = false, merchantPlace, note }) {
   return req(`/api/transactions/${id}/category`, {
     method: 'PATCH',
     accessToken,
     body: { category, applyToAll, merchantPlace: merchantPlace || undefined, note: note || undefined },
   });
+}
+
+/**
+ * Тэмдэглэл/газрын нэр — ангилал хөндөхгүй, override үүсгэхгүй.
+ * fields = { note } ЭСВЭЛ { merchantPlace }; '' → NULL (утга устгана).
+ */
+export function updateFields(accessToken, id, fields) {
+  return req(`/api/transactions/${id}/note`, { method: 'PATCH', accessToken, body: fields });
 }
 
 /**
@@ -62,4 +74,4 @@ export async function getTransaction(accessToken, id) {
   }
 }
 
-export default { patchCategory, getTransaction };
+export default { patchCategory, updateFields, getTransaction };

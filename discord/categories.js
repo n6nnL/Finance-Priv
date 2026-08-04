@@ -25,6 +25,10 @@ export function indexOfCategory(name) {
 //   'm'  = pending modal submit         m|txnId|catIdx|isPos|messageId
 //   'e'  = "Ангилал засах" товч          e|txnId
 //   'es' = засварын ангилал select       es|txnId|messageId (origin мессеж)
+//   'n'  = "Талбар засах" товч           n|txnId  (POS→Газрын нэр / бусад→Шалтгаан)
+//   'nm' = талбарын modal submit         nm|txnId|messageId
+//   'ay'/'an' = applyToAll Тийм/Үгүй     ay|txnId / an|txnId
+//   (утга/ангилал нь customId-д багтахгүй тул bot.js-ийн pendingConfirm Map-д)
 
 export function encodeButtonId(txnId, catIdx, isPos) {
   return `c|${txnId}|${catIdx}|${isPos ? 1 : 0}`;
@@ -44,13 +48,28 @@ export function encodeCatSelectId(txnId, messageId) {
   return `es|${txnId}|${messageId}`;
 }
 
+/** "Талбар засах" товч (POS→Газрын нэр / бусад→Шалтгаан — модуль шийднэ) */
+export function encodeFieldButtonId(txnId) {
+  return `n|${txnId}`;
+}
+
+/** Талбарын modal submit (origin мессежийн id — дараа refresh хийнэ) */
+export function encodeFieldModalId(txnId, messageId) {
+  return `nm|${txnId}|${messageId}`;
+}
+
+/** applyToAll баталгаажуулалтын Тийм/Үгүй товч */
+export function encodeApplyAllId(txnId, yes) {
+  return `${yes ? 'ay' : 'an'}|${txnId}`;
+}
+
 export function parseId(customId) {
   const p = String(customId || '').split('|');
   if (p.length < 2) return null;
   const kind = p[0];
   const txnId = Number(p[1]);
-  if (kind === 'e') return { kind, txnId };
-  if (kind === 'es') return { kind, txnId, messageId: p[2] || null };
+  if (kind === 'e' || kind === 'n' || kind === 'ay' || kind === 'an') return { kind, txnId };
+  if (kind === 'es' || kind === 'nm') return { kind, txnId, messageId: p[2] || null };
   // 'c' | 'm' — урт формат
   if (p.length < 4) return null;
   return {
