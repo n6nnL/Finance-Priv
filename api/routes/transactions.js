@@ -235,6 +235,45 @@ export function createTransactionsRouter({ db, ai }) {
     }
   });
 
+  // ---- PATCH /api/transactions/:id/exclusion — төсвөөс хасах/буцаах ----
+  //  Body: { excluded: true|false }. Өрийн дэвтрээс ХАМААРАЛГҮЙ шуурхай унтраалга
+  //  ("энэ миний бодит зарлага биш" тохиолдол).
+  //  ⚠️ ЗӨВХӨН төсөв/ангилал/шинжилгээнд нөлөөлнө — ҮЛДЭГДЭЛД ХЭЗЭЭ Ч нөлөөлөхгүй
+  //  (мөнгө бодитоор хөдөлсөн). Хасахад manually_edited=1 (pipeline дахин хөндөхгүй).
+  router.patch('/:id/exclusion', (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id)) return res.status(400).json({ status: 'error', error: 'буруу id' });
+      const { excluded } = req.body || {};
+      if (typeof excluded !== 'boolean') {
+        return res.status(400).json({ status: 'error', error: 'excluded нь boolean байх ёстой' });
+      }
+      const row = db.getById(req.userId, id);
+      if (!row) return res.status(404).json({ status: 'error', error: 'Гүйлгээ олдсонгүй' });
+
+      // Өрийн бичлэгээс үүдсэн хасалтыг шууд буцаахыг зөвшөөрөхгүй — эхлээд
+      // холбоосыг нь салгах ёстой (эс бөгөөс дэвтэр ба туг зөрөх эрсдэлтэй).
+      if (!excluded && db.isTransactionReferencedByOtherDebt(req.userId, id, null)) {
+        return res.status(409).json({
+          status: 'error',
+          error: 'Энэ гүйлгээ өрийн бичлэгтэй холбоотой тул хасалтыг шууд буцаах боломжгүй. Эхлээд өрийн бичлэгээс салгана уу.',
+        });
+      }
+
+      db.setTransactionExclusion(req.userId, id, excluded);
+      const updated = db.getById(req.userId, id);
+      logger.info('Төсвөөс хасалт', { id, excluded });
+      return res.status(200).json({
+        status: 'ok', id,
+        excluded: updated.excluded_from_budget === 1,
+        manuallyEdited: updated.manually_edited === 1,
+      });
+    } catch (err) {
+      logger.error('PATCH exclusion алдаа', { err: err?.message });
+      return res.status(500).json({ status: 'error', error: 'Internal Server Error' });
+    }
+  });
+
   return router;
 }
 

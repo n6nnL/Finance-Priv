@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../lib/api.js';
 import { money, catLabel, catEmoji, catHex } from '../lib/format.js';
 import BalanceHistory from './BalanceHistory.jsx';
+import DebtLedger from './DebtLedger.jsx';
 
 const PERIODS = [
   { id: 1, label: 'Энэ сар' },
@@ -226,6 +227,9 @@ export default function Analyze() {
       ) : (
         <div className={cardCls}><div className="text-[14px] text-[#8C8578]">Ачаалж байна…</div></div>
       )}
+
+      {/* Өр төлбөрийн дэвтэр — хүн хоорондын зээл (Календарь БИШ, энд байрлана) */}
+      <DebtLedger />
     </div>
   );
 }

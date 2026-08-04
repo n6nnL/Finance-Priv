@@ -135,6 +135,7 @@ D:\Claude\
 | `PendingReview.jsx` | Ангилаагүй гүйлгээний шар banner + баталгаажуулах modal. Талбарын шошго `detailFieldFor()`-оос, `applyToAll` checkbox **default OFF** |
 | `Analyze.jsx` | Сараар орлого/зарлага (1/3/12 сар), ангиллын задаргаа, `BalanceHistory`-г агуулна |
 | `BalanceHistory.jsx` | Өдөр тутмын **үлдэгдлийн график** (7х/30х/3с/6с/1ж preset эсвэл custom муж), цэг дээр даран тухайн өдрийн гүйлгээний задаргаа |
+| `DebtLedger.jsx` | **Өр төлбөрийн дэвтэр** — `Analyze.jsx`-ийн дотор (Календарь БИШ). Хоёр харагдац: «Үлдэгдэл» (хүн × валют бүрийн цэвэр өр — "Болд танд 30,000₮ өртэй") ба «Түүх» (бүх зээл/зээлүүлэлт/хаалт). Нэмэх форм (хэн/чиглэл/дүн/валют/огноо/тэмдэглэл + **холбох гүйлгээ сонгогч**), хаах/нээх/устгах. EUR-ийг эх валютаар харуулж, ханш байвал `≈ ₮` нэмнэ. **Бүх арифметик `lib/debt.js`-д** |
 | `Calendar.jsx` | Сарын хуанли: цалингийн өдөр, захиалга, хувийн event. `Planner`, `Settings`, `BudgetTracker`, `ManualSavings`-г агуулна |
 | `Planner.jsx` | Циклийн төлөвлөгөө (цалин → захиалга → хуваарилалт → үлдэх) |
 | `BudgetTracker.jsx` | **Бодит зарцуулалт vs %-хуваарилалт** real-time. Bar ≥85% шар, >100% улаан. Debounced PUT |
@@ -146,6 +147,7 @@ D:\Claude\
 |---|---|
 | `api.js` | JWT client. Бүх дуудалт relative `/api/...`. 401 → refresh-ээр нэг удаа автомат дахин оролдоно. `consumeAuthFragment()` (Google callback-ийн `#token`). `patchCategory` / `updateFields` (тэмдэглэл+газрын нэр) / `updateNote` (back-compat) |
 | `budget.js` | Огноо/циклийн **цэвэр логик** (React-гүй, тестлэгдсэн). Санхүүгийн дүн ХАТУУ БИЧИГДЭХГҮЙ — settings-ээс дамжина |
+| `debt.js` | Өрийн **цэвэр логик** (React-гүй, тестлэгдсэн): `netBalances()` (хүн × валют — ⚠️ MNT ба EUR ХЭЗЭЭ Ч хооронд цэвэрших ЁСГҮЙ), `groupByCounterparty`, `totalsByCurrency`, `eurToMntDisplay` (ханшгүй бол **null**, хуурамч тоо гаргахгүй), `balancePhrase` (монгол өгүүлбэрийн бүтэц) |
 | `format.js` | `money()`, `catLabel/catEmoji/catHex`, `displayDesc()`, **дүнг нуух горим** (`applyAmountsMasked`, localStorage) |
 
 ### 3.5 `scripts/` — нэг удаагийн ба ops
@@ -242,6 +244,7 @@ D:\Claude\
 | GET | `/transactions/:id` | Нэг гүйлгээний одоогийн төлөв (bot-д) |
 | PATCH | `/transactions/:id/category` | Баталгаажуулах/ангилал засах. Body `{category, applyToAll?, merchantPlace?, note?}`. **`learn = !!applyToAll` ГАГЦХҮҮ** — `merchantPlace`/`note` дангаараа override үүсгэхээ БОЛЬСОН (өмнө нь авто-эскалаци хийдэг байсан). `applyToAll=true` → тэр мерчантын бүх мөр + `category_overrides`; `false` → зөвхөн тухайн мөр. Хоёр зам ч `manually_edited=1`, талбар нь `COALESCE` (хоосноор дарж бичихгүй) |
 | PATCH | `/transactions/:id/note` | Тэмдэглэл/газрын нэр — **ангилал хөндөхгүй, override үүсгэхгүй**. Body `{note?, merchantPlace?}`: **body-д БАЙГАА талбарыг Л шинэчилнэ**; тодорхой хоосон string → `NULL` (утга устгах боломж); хоёулаа байхгүй → 400. Хариу `{status:'ok', id, note, merchantPlace}` |
+| PATCH | `/transactions/:id/exclusion` | **Төсвөөс хасах/буцаах.** Body `{excluded: boolean}` (boolean биш → 400). Хасахад `manually_edited=1`. ⚠️ ЗӨВХӨН төсөв/ангилал/шинжилгээнд нөлөөлнө — **үлдэгдэлд ХЭЗЭЭ Ч нөлөөлөхгүй**. Өрийн бичлэгтэй холбоотой гүйлгээний хасалтыг шууд буцаах гэвэл **409** (эхлээд дэвтрээс салгана) |
 
 ### Meta / Analytics (`routes/meta.js`)
 | Method | Зам | Тайлбар |
@@ -269,6 +272,19 @@ D:\Claude\
 `{date, type:'deposit'|'withdrawal', currency:'MNT'|'EUR', amount>0, note}`.
 Balance = валют тус бүрээр тэмдэгт нийлбэр — **backend хэзээ ч хөрвүүлэхгүй**.
 
+### Өр төлбөрийн дэвтэр (`routes/debtLedger.js`, бүгд `/api/debt-ledger` дор)
+| Method | Зам | Тайлбар |
+|---|---|---|
+| GET | `/debt-ledger` | Жагсаалт (шинэ нь эхэнд). Шүүлт: `?counterparty=`, `?status=open\|settled` |
+| GET | `/debt-ledger/balances` | **Хүн × валют** тус бүрийн цэвэр үлдэгдэл (зөвхөн `open`). `[{counterparty, currency, net, direction}]` — `net>0` = тэр хүн ХЭРЭГЛЭГЧИД өртэй. Тэг болж цэвэршсэн хосыг буцаахгүй |
+| POST | `/debt-ledger` | `{counterparty, direction:'i_lent'\|'i_borrowed', amount>0, currency:'MNT'\|'EUR', entryDate, note?, linkedTransactionId?}`. Холбоос өгвөл тэр гүйлгээг **атомоор** төсвөөс хасна |
+| PATCH | `/debt-ledger/:id` | Засах / хаах (`{status:'settled', settledTransactionId?}`) / дахин нээх. Холбоос солих/салгах үед хасалтыг зөв тавьж/буцаана |
+| DELETE | `/debt-ledger/:id` | Устгах + энэ бичлэгээс үүдсэн хасалтыг буцаана |
+
+⚠️ **Хасалт буцаах хамгаалалт:** гүйлгээг **ӨӨР** өрийн бичлэг лавлаж байвал хасалт буцаагдахгүй
+(нэг зарлагыг хоёр хүнд хуваасан тохиолдол). `isTransactionReferencedByOtherDebt()` шалгана.
+`debt_ledger` + `transactions` хоёуланд бичих үйлдэл бүр **нэг SQLite транзакцид** ороосон.
+
 ### Telegram (`routes/telegram.js`, JWT-only)
 `POST /telegram/link-code` (6 оронтой, 10 мин) · `POST /telegram/unlink`
 
@@ -285,7 +301,7 @@ Balance = валют тус бүрээр тэмдэгт нийлбэр — **bac
 
 | Хүснэгт | Гол багана |
 |---|---|
-| `transactions` | `user_id, amount, currency, txn_date, type, category, status, description, merchant_place, is_pos, note, ai_suggested_category, ai_confidence, manually_edited, account_balance, message_id (UNIQUE)` |
+| `transactions` | `user_id, amount, currency, txn_date, type, category, status, description, merchant_place, is_pos, note, ai_suggested_category, ai_confidence, manually_edited, account_balance, **excluded_from_budget**, message_id (UNIQUE)` |
 | `category_overrides` | `user_id, merchant_pattern, category, friendly_name, default_note` — `UNIQUE(user_id, merchant_pattern)` |
 | `users` | `id, email UNIQUE, password_hash, role, google_sub, picture` |
 | `user_settings` | `user_id PK, data (JSON)` |
@@ -296,12 +312,15 @@ Balance = валют тус бүрээр тэмдэгт нийлбэр — **bac
 | `telegram_link_codes` | `code PK, user_id, expires_at, used` |
 | `telegram_notifications` | `(transaction_id, chat_id) PK, message_id` |
 | `manual_ledger_entries` | `user_id, entry_date, type, amount, currency, amount_eur, exchange_rate, note` |
+| `debt_ledger` | `user_id, counterparty, direction ('i_lent'\|'i_borrowed'), amount (CHECK>0), currency ('MNT'\|'EUR'), entry_date, note, status ('open'\|'settled'), linked_transaction_id (→transactions, ON DELETE SET NULL), settled_transaction_id (мөн адил), created_at, settled_at` |
 
-**Миграцын түүх (14):** 001–004 үндсэн + dashboard/AI/note · **005** auth+multi-tenant
+**Миграцын түүх (15):** 001–004 үндсэн + dashboard/AI/note · **005** auth+multi-tenant
 (`user_id` бүх хүснэгтэд, `category_overrides`-г table-rebuild хийсэн) · 006 settings+events ·
 007 google_sub/picture + google_tokens · 008 budget_allocations · 009 Gmail multi-tenant
 баганууд + **token encryption backfill** · 010 Telegram хүснэгтүүд · 011 `gmail_oauth_client`
-marker · 012 `account_balance` · 013 `manual_ledger_entries` · 014 `currency` багана.
+marker · 012 `account_balance` · 013 `manual_ledger_entries` · 014 `currency` багана ·
+**015** `debt_ledger` хүснэгт (+3 индекс) БА `transactions.excluded_from_budget`
+(`INTEGER NOT NULL DEFAULT 0` — хуучин мөр бүгд 0, **backfill шаардлагагүй**).
 
 PRAGMA: `journal_mode=WAL`, `synchronous=NORMAL`, `foreign_keys=ON`.
 WAL нь **олон процесс** (api + listener + 2 bot) нэг файлыг зэрэг ашиглах боломж өгдөг.
@@ -460,19 +479,19 @@ Discord / Telegram / Website гурвуулан **ижил чадвартай**.
 
 ---
 
-## 12. Тест (нийт **205**, бүгд `node --test`)
+## 12. Тест (нийт **235**, бүгд `node --test`)
 
 ⚠️ Root дээрх `npm test` (= `node --test`) нь **recursive** тул доорх БҮХ багцыг
-(api/telegram/discord/dashboard оруулаад) нэг дор ажиллуулж **205** гэж мэдээлдэг.
+(api/telegram/discord/dashboard оруулаад) нэг дор ажиллуулж **235** гэж мэдээлдэг.
 Багц бүрийг тусад нь ажиллуулах командыг баруун баганад бичив.
 
 | Багц | Тоо | Ажиллуулах |
 |---|---|---|
-| API | **131** (api 12, auto-classify 3, balance-history 18, balance 6, budget-status 12, budget 8, dashboard **17**, gmail-auth 12, google-auth 11, google-provider 3, manual-savings 16, telegram 6, token-crypto 7) | `cd api && npm test` |
-| Дундын (`test/`) | **33** (golomt 12, categorize 10, shared 4, **transactionActions 7**) | `node --test test/` |
+| API | **150** (api 12, auto-classify 3, balance-history 18, balance 6, budget-status 12, budget 8, dashboard 17, **debt-ledger 19**, gmail-auth 12, google-auth 11, google-provider 3, manual-savings 16, telegram 6, token-crypto 7) | `cd api && npm test` |
+| Дундын (`test/`) | **33** (golomt 12, categorize 10, shared 4, transactionActions 7) | `node --test test/` |
 | Listener модуль | **12** (accounts 4, manager 4, balanceAlert 4) | `node --test src/*.test.js` |
 | Telegram | **12** (db 10, isolation 2) | `cd telegram && npm test` |
-| Dashboard цэвэр логик | **12** (budget) | `node --test dashboard/src/lib/budget.test.js` |
+| Dashboard цэвэр логик | **23** (budget 12, **debt 11**) | `node --test dashboard/src/lib/*.test.js` |
 | Discord | **5** (categories) | `cd discord && npm test` |
 
 Загвар: API тестүүд жинхэнэ `createApp()`-г `:memory:` DB дээр ачаалж, HTTP түвшинд шалгана
@@ -482,6 +501,12 @@ transactionActions.js) нь dependency-injected/цэвэр тул тусад н�
 `dashboard.test.js`-ийн ангиллын гэрээний тестүүд: `applyToAll:true` → override +
 олон мөр · **`applyToAll`-гүй `merchantPlace`/`note` → override ҮҮСЭХГҮЙ, зөвхөн ганц мөр** ·
 `/note`-ийн "байгаа талбарыг л шинэчилнэ, `''` → NULL, хоосон body → 400" семантик.
+
+`debt-ledger.test.js`-ийн ★ гол баталгаанууд: **хасагдсан гүйлгээ `by-category`/`summary`/
+`monthly`/`budget-status`-аас алга болох ч `/balance` БА `balance-history`-д хэвээр** ·
+`transactions` жагсаалтаас алга болохгүй (буцааж асаах боломж) · холбох→хасалт,
+settle+орлого холбох→орлогын хасалт, re-open→буцаалт · **"өөр бичлэг лавлаж байвал
+хасалт буцаахгүй"** хамгаалалт · cross-user унших/засах/холбох бүгд татгалзагдана.
 
 ---
 
@@ -525,21 +550,31 @@ transactionActions.js) нь dependency-injected/цэвэр тул тусад н�
 | Rate limiter | In-memory — олон instance/cluster-т Redis рүү шилжих хэрэгтэй болно |
 | Root `golomt.js` | Repo-ийн үндэст байгаа `golomt.js` нь **хуучин, ашиглагдахгүй хуулбар** (зөвхөн EASYINFO загварыг мэднэ). Бодит parser бол [`src/parsers/golomt.js`](src/parsers/golomt.js) (5 загвар). Ямар ч код үүнийг импортлодоггүй — цэвэрлэх боломжтой |
 | Google Sheets | Хуучин баримтад дурдагддаг ч ашиглагдахгүй. Бодит storage бол SQLite. (Python legacy файлууд одоо repo-д БАЙХГҮЙ) |
+| ⚠️ **`excluded_from_budget` = ЗӨВХӨН шинжилгээ** | Найзын билетийг картаараа авахад мөнгө **бодитоор** дансаас гардаг тул `balance`/`balance-history`-д **ЗААВАЛ** тоологдоно; зөвхөн "Тээвэр 600% хэтэрсэн" гэх ангиллын гажуудлыг арилгахаар төсөв/шинжилгээнээс хасагдана. Шинэ analytics query нэмэхдээ `AND excluded_from_budget = 0` бичихээ **бүү мартаарай**; эсрэгээр **үлдэгдлийн** query-д ХЭЗЭЭ Ч бүү нэм. `buildWhere(userId, {budgetOnly:true})` нь энэ шүүлтийг өгнө — `listTransactions` түүнийг ЗОРИУД дамжуулдаггүй (хэрэглэгч хасагдсан мөрөө хараад буцааж асаах ёстой) |
+| Өрийн холбоос ба хасалт | Нэг гүйлгээг **олон** өрийн бичлэг лавлаж болно (нэг зарлагыг хэд хэдэн хүнд хуваасан). Тиймээс холбоос тасрахад хасалтыг **шууд бүү буцаа** — `isTransactionReferencedByOtherDebt()`-ээр өөр лавлагаа байгаа эсэхийг эхлээд шалга |
 
 ---
 
 ## 15. Одоогийн төлөв (2026-08-04)
 
 - Серверт 4 pm2 процесс online, домейн амьд.
-- 1 хэрэглэгч (owner), ~1,057 гүйлгээ (2022-11 → 2026-07), бүгд ангилагдсан.
-- Gmail холбогдсон (owner). Calendar/Telegram холбогдоогүй. Telegram bot ажиллаж байна.
+- Calendar/Telegram холбогдоогүй. Telegram bot ажиллаж байна.
 - AI ангилал **унтраалттай** (`AI_CATEGORIZATION_ENABLED=false`) — credit байхгүй. Асаахад
   танигдаагүй мерчантад санал өгнө; унтраалттай үед зүгээр pending_review болно.
-- **Сүүлийн ажил — гүйлгээний үйлдлийн parity (§9):** `config/transactionActions.js` дундын
+- **Сүүлийн ажил (deploy ХИЙГЭЭГҮЙ) — Өрийн дэвтэр + төсвөөс хасах туг:** миграц 015
+  (`debt_ledger` + `transactions.excluded_from_budget`), `routes/debtLedger.js`,
+  `PATCH /transactions/:id/exclusion`, `dashboard/src/lib/debt.js` (цэвэр netting),
+  `DebtLedger.jsx` (Шинжилгээ табын дотор). Нөхөн төлбөрийн кэйс шийдэгдсэн: найзын
+  билетийн зардал ангиллын төсвөөс гарч, үлдэгдэлд хэвээр үлдэнэ. **Серверт гараагүй.**
+- **Өмнөх ажил — гүйлгээний үйлдлийн parity (§9):** `config/transactionActions.js` дундын
   капабилити модуль нэмэгдэж, Discord/Telegram/Website гурвуулан ижил чадвартай болсон
   (ангилал дахин засах, талбар засах, устгах, `applyToAll` default OFF + баталгаажуулалт).
   Backend: `PATCH /:id/category`-ийн override авто-эскалаци тасарсан (`learn = !!applyToAll`),
   `PATCH /:id/note` нь `merchantPlace`-ийг ч хүлээж авдаг болсон (шинэ route нэмээгүй).
+  Энэ ажил **серверт гарсан** (commit `1f900e4`).
+- **Production дээрх бодит тоо (2026-08-04):** 2 хэрэглэгч (id=1 admin, id=3 user),
+  ~1,115 гүйлгээ, 39 learned override. ⚠️ Owner-ийн Gmail `reauth_needed` төлөвтэй —
+  сүүлийн бодит гүйлгээ 2026-08-02, шинэ и-мэйл татагдахгүй байна (Settings-ээс дахин холбох).
 - Өмнөх ажлууд: EUR-г эх валютаар хадгалах, амьд FX ханш, үлдэгдлийн график + муж
   сонголт, өдөр тутмын зарлагын drill-down, Бодит зарцуулалт харах/засах горим.
 - Хийгдээгүй/дараагийн боломж: `Insights` (Шийдвэр) таб placeholder хэвээр; хуучин ~1057

@@ -173,6 +173,14 @@ export const api = {
   addManualSaving: (entry) => req('/api/manual-savings', { method: 'POST', body: entry }),
   updateManualSaving: (id, entry) => req(`/api/manual-savings/${id}`, { method: 'PUT', body: entry }),
   deleteManualSaving: (id) => req(`/api/manual-savings/${id}`, { method: 'DELETE' }),
+  // ---- Гүйлгээг төсвөөс хасах/буцаах (үлдэгдэлд нөлөөлөхгүй) ----
+  setExclusion: (id, excluded) => req(`/api/transactions/${id}/exclusion`, { method: 'PATCH', body: { excluded } }),
+  // ---- Өр төлбөрийн дэвтэр (хүн хоорондын) ----
+  debtLedger: (filters) => req('/api/debt-ledger' + qs(filters)),
+  debtBalances: () => req('/api/debt-ledger/balances'),
+  addDebt: (entry) => req('/api/debt-ledger', { method: 'POST', body: entry }),
+  updateDebt: (id, patch) => req(`/api/debt-ledger/${id}`, { method: 'PATCH', body: patch }),
+  deleteDebt: (id) => req(`/api/debt-ledger/${id}`, { method: 'DELETE' }),
   // ---- Real-time tracker ----
   budgetStatus: () => req('/api/budget-status?cycle=current'),
   budgetAllocations: () => req('/api/budget-allocations'),

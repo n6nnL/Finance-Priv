@@ -308,6 +308,44 @@ export function createDb(dbPath, opts = {}) {
     if (!hasColumn('manual_ledger_entries', 'currency')) {
       db.exec("ALTER TABLE manual_ledger_entries ADD COLUMN currency TEXT NOT NULL DEFAULT 'MNT'");
     }
+
+    // 015: ӨР ТӨЛБӨРИЙН ДЭВТЭР + ТӨСВӨӨС ХАСАХ ТУГ -------------------------------
+    // (a) debt_ledger — хүн хоорондын өр (Болд надад өртэй / би ээждээ өртэй).
+    //     manual_ledger_entries-ийн ЯГ ТЭР философи: дүнг ЭХ ВАЛЮТААР нь хадгална,
+    //     backend ХЭЗЭЭ Ч хөрвүүлэхгүй — MNT/EUR тус тусдаа цэвэршүүлж (net),
+    //     зөвхөн frontend display үед амьд ханшаар харуулна.
+    //     linked_transaction_id  = өр үүсгэсэн ЭХ гүйлгээ (ж: найзын билет авсан зарлага)
+    //     settled_transaction_id = өрийг ХААСАН гүйлгээ (ж: буцааж өгсөн орлого) — сонголттой.
+    //     FK-д ON DELETE SET NULL — гүйлгээ уствал өрийн бичлэг үлдэнэ (холбоос л тасарна).
+    db.exec(`CREATE TABLE IF NOT EXISTS debt_ledger (
+      id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id                INTEGER NOT NULL REFERENCES users(id),
+      counterparty           TEXT NOT NULL,
+      direction              TEXT NOT NULL CHECK (direction IN ('i_lent','i_borrowed')),
+      amount                 REAL NOT NULL CHECK (amount > 0),
+      currency               TEXT NOT NULL DEFAULT 'MNT' CHECK (currency IN ('MNT','EUR')),
+      entry_date             TEXT NOT NULL,
+      note                   TEXT,
+      status                 TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','settled')),
+      linked_transaction_id  INTEGER REFERENCES transactions(id) ON DELETE SET NULL,
+      settled_transaction_id INTEGER REFERENCES transactions(id) ON DELETE SET NULL,
+      created_at             TEXT NOT NULL DEFAULT (datetime('now')),
+      settled_at             TEXT)`);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_debt_ledger_user ON debt_ledger (user_id)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_debt_ledger_linked ON debt_ledger (linked_transaction_id)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_debt_ledger_settled ON debt_ledger (settled_transaction_id)');
+
+    // (b) transactions.excluded_from_budget — ⚠️ ЗӨВХӨН төсөв/ангилал/шинжилгээнд
+    //     нөлөөлнө, ҮЛДЭГДЭЛД ХЭЗЭЭ Ч НӨЛӨӨЛӨХГҮЙ. Найзын билетийг картаараа
+    //     авахад мөнгө БОДИТООР дансаас гарсан тул balance-д тоологдох ЁСТОЙ;
+    //     харин "Тээвэр" ангиллын төсвийг 600% хэтрүүлэх нь БУРУУ. Тиймээс
+    //     getSummary/getMonthly/getByCategory/getCycleSpend дээр л шүүгдэнэ;
+    //     getCurrentBalance/getBalanceAnchor/getDailyTxnStats/balanceHistory.js
+    //     БОЛОН listTransactions (хэрэглэгч буцааж асаах ёстой) ХӨНДӨГДӨХГҮЙ.
+    //     Хуучин бүх мөр DEFAULT 0 (оролцоно) — backfill шаардлагагүй.
+    if (!hasColumn('transactions', 'excluded_from_budget')) {
+      db.exec('ALTER TABLE transactions ADD COLUMN excluded_from_budget INTEGER NOT NULL DEFAULT 0');
+    }
   }
   migrate();
 
@@ -446,10 +484,17 @@ export function createDb(dbPath, opts = {}) {
     }));
   }
 
-  /** Шүүлтийн WHERE — ҮРГЭЛЖ user_id-аар эхэлнэ (tenant isolation) */
-  function buildWhere(userId, { from, to, category, type, q, minAmount, maxAmount, status } = {}) {
+  /**
+   * Шүүлтийн WHERE — ҮРГЭЛЖ user_id-аар эхэлнэ (tenant isolation).
+   * @param {{budgetOnly?: boolean}} filters  budgetOnly=true үед төсвөөс хасагдсан
+   *   мөрийг (excluded_from_budget=1) хасна — ЗӨВХӨН шинжилгээ/төсвийн дуудагчид.
+   *   listTransactions нь үүнийг ДАМЖУУЛАХГҮЙ: хэрэглэгч хасагдсан мөрөө жагсаалтдаа
+   *   хараад буцааж асаах боломжтой байх ёстой.
+   */
+  function buildWhere(userId, { from, to, category, type, q, minAmount, maxAmount, status, budgetOnly } = {}) {
     const where = ['user_id = ?'];
     const params = [userId];
+    if (budgetOnly) where.push('excluded_from_budget = 0');
     if (from) { where.push('txn_date >= ?'); params.push(from); }
     if (to) { where.push('txn_date <= ?'); params.push(to); }
     if (category) {
@@ -474,8 +519,10 @@ export function createDb(dbPath, opts = {}) {
     return { rows: attachOverrideInfo(userId, rows), total: Number(total), limit: lim, offset: off };
   }
 
+  // ⚠️ ШИНЖИЛГЭЭ — төсвөөс хасагдсан мөр ОРОХГҮЙ (budgetOnly). Үлдэгдлийн
+  // тооцоололд (getCurrentBalance/getDailyTxnStats) энэ шүүлт БАЙХГҮЙ.
   function getSummary(userId, filters = {}) {
-    const { whereSql, params } = buildWhere(userId, filters);
+    const { whereSql, params } = buildWhere(userId, { ...filters, budgetOnly: true });
     const totals = db.prepare(`SELECT
         COALESCE(SUM(CASE WHEN type='expense' THEN amount ELSE 0 END),0) AS total_expense,
         COALESCE(SUM(CASE WHEN type='income'  THEN amount ELSE 0 END),0) AS total_income,
@@ -501,7 +548,7 @@ export function createDb(dbPath, opts = {}) {
              COALESCE(SUM(CASE WHEN type='expense' THEN amount ELSE 0 END),0) AS expense,
              COALESCE(SUM(CASE WHEN type='income'  THEN amount ELSE 0 END),0) AS income,
              COUNT(*) AS count
-      FROM transactions WHERE user_id = ? AND txn_date IS NOT NULL
+      FROM transactions WHERE user_id = ? AND txn_date IS NOT NULL AND excluded_from_budget = 0
       GROUP BY ym ORDER BY ym DESC LIMIT ?`).all(userId, Math.min(Math.max(Number(months) || 12, 1), 60));
     return rows.reverse().map((r) => ({ month: r.ym, expense: Number(r.expense), income: Number(r.income), count: Number(r.count) }));
   }
@@ -522,13 +569,13 @@ export function createDb(dbPath, opts = {}) {
              COUNT(*) AS count, COALESCE(SUM(amount),0) AS total
       FROM transactions
       WHERE user_id=? AND type='expense' AND txn_date IS NOT NULL
-            AND substr(txn_date,1,7)=?
+            AND substr(txn_date,1,7)=? AND excluded_from_budget = 0
       GROUP BY 1 ORDER BY total DESC`).all(userId, m)
       .map((r) => ({ category: r.category, total: Number(r.total), count: Number(r.count) }));
     const exp = db.prepare(`SELECT COALESCE(SUM(amount),0) AS t FROM transactions
-      WHERE user_id=? AND type='expense' AND txn_date IS NOT NULL AND substr(txn_date,1,7)=?`).get(userId, m).t;
+      WHERE user_id=? AND type='expense' AND txn_date IS NOT NULL AND substr(txn_date,1,7)=? AND excluded_from_budget = 0`).get(userId, m).t;
     const inc = db.prepare(`SELECT COALESCE(SUM(amount),0) AS t FROM transactions
-      WHERE user_id=? AND type='income' AND txn_date IS NOT NULL AND substr(txn_date,1,7)=?`).get(userId, m).t;
+      WHERE user_id=? AND type='income' AND txn_date IS NOT NULL AND substr(txn_date,1,7)=? AND excluded_from_budget = 0`).get(userId, m).t;
     return { month: m, byCategory, totalExpense: Number(exp), totalIncome: Number(inc) };
   }
 
@@ -546,7 +593,7 @@ export function createDb(dbPath, opts = {}) {
              COALESCE(SUM(amount),0) AS total
       FROM transactions
       WHERE user_id=? AND type='expense' AND txn_date IS NOT NULL
-            AND txn_date >= ? AND txn_date < ?
+            AND txn_date >= ? AND txn_date < ? AND excluded_from_budget = 0
       GROUP BY cat`).all(userId, startYmd, endYmd);
     let unclassified = 0;
     const byCategory = [];
@@ -557,7 +604,8 @@ export function createDb(dbPath, opts = {}) {
     byCategory.sort((a, b) => b.spent - a.spent);
     const totalSpend = byCategory.reduce((s, r) => s + r.spent, 0) + unclassified;
     const actualIncome = Number(db.prepare(`SELECT COALESCE(SUM(amount),0) t FROM transactions
-      WHERE user_id=? AND type='income' AND txn_date IS NOT NULL AND txn_date >= ? AND txn_date < ?`)
+      WHERE user_id=? AND type='income' AND txn_date IS NOT NULL AND txn_date >= ? AND txn_date < ?
+            AND excluded_from_budget = 0`)
       .get(userId, startYmd, endYmd).t);
     return { byCategory, unclassified, totalSpend, actualIncome };
   }
@@ -975,6 +1023,208 @@ export function createDb(dbPath, opts = {}) {
     return _deleteLedger.run(id, userId).changes;
   }
 
+  // ===================== ӨР ТӨЛБӨРИЙН ДЭВТЭР (debt_ledger, per-user) =====================
+  //  Философи нь manual_ledger_entries-тэй ИЖИЛ: дүн ЭХ ВАЛЮТААР, backend хөрвүүлэхгүй.
+  //  Гүйлгээтэй холбогдох үед transactions.excluded_from_budget-г ХАМТ шинэчилдэг тул
+  //  бүх ийм үйлдэл НЭГ SQLite транзакцид ороосон (тал дутуу төлөв үүсэхээс сэргийлнэ).
+
+  const _debtCols = `id, user_id, counterparty, direction, amount, currency, entry_date, note,
+                     status, linked_transaction_id, settled_transaction_id, created_at, settled_at`;
+
+  const _mapDebt = (r) => (r ? {
+    id: Number(r.id),
+    counterparty: r.counterparty,
+    direction: r.direction,
+    amount: Number(r.amount),
+    currency: r.currency || 'MNT',
+    entryDate: r.entry_date,
+    note: r.note ?? null,
+    status: r.status,
+    linkedTransactionId: r.linked_transaction_id == null ? null : Number(r.linked_transaction_id),
+    settledTransactionId: r.settled_transaction_id == null ? null : Number(r.settled_transaction_id),
+    createdAt: r.created_at,
+    settledAt: r.settled_at ?? null,
+  } : null);
+
+  const _getDebt = db.prepare(`SELECT ${_debtCols} FROM debt_ledger WHERE id=? AND user_id=?`);
+
+  /** Нэг өрийн бичлэг (per-user scoped) — олдохгүй бол null. */
+  function getDebtEntry(userId, id) {
+    return _mapDebt(_getDebt.get(id, userId));
+  }
+
+  /** Жагсаалт — шинэ нь эхэнд. counterparty/status шүүлт сонголттой. */
+  function listDebtEntries(userId, { counterparty, status } = {}) {
+    const where = ['user_id = ?'];
+    const params = [userId];
+    if (counterparty) { where.push('counterparty = ?'); params.push(String(counterparty).trim()); }
+    if (status) { where.push('status = ?'); params.push(status); }
+    return db.prepare(`SELECT ${_debtCols} FROM debt_ledger WHERE ${where.join(' AND ')}
+      ORDER BY entry_date DESC, id DESC`).all(...params).map(_mapDebt);
+  }
+
+  /**
+   * Хүн бүрээр, ВАЛЮТ ТУС БҮРЭЭР цэвэр үлдэгдэл (зөвхөн status='open').
+   * net > 0 → тэр хүн ХЭРЭГЛЭГЧИД өртэй (i_lent давамгайлсан);
+   * net < 0 → хэрэглэгч тэр хүнд өртэй. MNT ба EUR-ийг ХЭЗЭЭ Ч нийлүүлэхгүй.
+   * Тэг болж цэвэршсэн хосыг буцаахгүй (өр үлдээгүй тул).
+   */
+  function getDebtBalances(userId) {
+    return db.prepare(`
+      SELECT counterparty, currency,
+             COALESCE(SUM(CASE WHEN direction='i_lent' THEN amount ELSE -amount END), 0) AS net
+      FROM debt_ledger
+      WHERE user_id=? AND status='open'
+      GROUP BY counterparty, currency
+      HAVING net <> 0
+      ORDER BY counterparty ASC, currency ASC`).all(userId)
+      .map((r) => ({
+        counterparty: r.counterparty,
+        currency: r.currency,
+        net: Number(r.net),
+        direction: Number(r.net) > 0 ? 'i_lent' : 'i_borrowed',
+      }));
+  }
+
+  // --- Гүйлгээний хасалтын туслахууд ---
+
+  const _setExcluded = db.prepare(`UPDATE transactions
+    SET excluded_from_budget=@excluded, manually_edited=CASE WHEN @excluded=1 THEN 1 ELSE manually_edited END
+    WHERE id=@id AND user_id=@user_id`);
+
+  /**
+   * Гүйлгээг төсвөөс хасах/буцаах. Хасахад manually_edited=1 болгоно (pipeline
+   * дахин parse/categorize хийхгүй). Буцаахад manually_edited-г БУЦААХГҮЙ —
+   * хэрэглэгч гар хүрсэн баримт хэвээр үлдэнэ.
+   * @returns {number} өөрчлөгдсөн мөрийн тоо
+   */
+  function setTransactionExclusion(userId, id, excluded) {
+    return _setExcluded.run({ id, user_id: userId, excluded: excluded ? 1 : 0 }).changes;
+  }
+
+  /**
+   * Тухайн гүйлгээг ӨӨР өрийн бичлэг (excludeDebtId-аас бусад) хараахан
+   * лавлаж байгаа эсэх. Хасалтыг буцаахаас ӨМНӨ ЗААВАЛ шалгана — эс бөгөөс
+   * нэг бичлэг устгахад нөгөөгийн хасалт санамсаргүй сэргэнэ.
+   */
+  function isTransactionReferencedByOtherDebt(userId, txnId, excludeDebtId = null) {
+    if (txnId == null) return false;
+    const row = db.prepare(`SELECT COUNT(*) c FROM debt_ledger
+      WHERE user_id=? AND id IS NOT ?
+        AND (linked_transaction_id=? OR settled_transaction_id=?)`)
+      .get(userId, excludeDebtId, txnId, txnId);
+    return Number(row.c) > 0;
+  }
+
+  /** Холбоос тасрах үед хасалтыг буцаана — ӨӨР бичлэг лавлаагүй тохиолдолд Л. */
+  function releaseExclusionIfUnreferenced(userId, txnId, excludeDebtId) {
+    if (txnId == null) return;
+    if (isTransactionReferencedByOtherDebt(userId, txnId, excludeDebtId)) return;
+    setTransactionExclusion(userId, txnId, false);
+  }
+
+  /** Гүйлгээ тухайн хэрэглэгчийнх мөн эсэх (холбохын өмнөх эрхийн шалгалт). */
+  function transactionBelongsToUser(userId, txnId) {
+    if (txnId == null) return true;
+    return !!db.prepare('SELECT 1 FROM transactions WHERE id=? AND user_id=?').get(txnId, userId);
+  }
+
+  /** ⚠️ Хоёр хүснэгтэд бичих үйлдлийг НЭГ транзакцид ороож дуудна. */
+  function inTransaction(fn) {
+    db.exec('BEGIN');
+    try { const out = fn(); db.exec('COMMIT'); return out; }
+    catch (e) { db.exec('ROLLBACK'); throw e; }
+  }
+
+  const _insertDebt = db.prepare(`
+    INSERT INTO debt_ledger (user_id, counterparty, direction, amount, currency, entry_date, note,
+                             status, linked_transaction_id, created_at)
+    VALUES (@user_id, @counterparty, @direction, @amount, @currency, @entry_date, @note,
+            'open', @linked, datetime('now'))`);
+
+  /**
+   * Шинэ өрийн бичлэг. linked_transaction_id өгвөл тэр гүйлгээг ТӨСВӨӨС ХАСНА
+   * (нэг транзакцид — тал дутуу төлөв үүсэхгүй).
+   */
+  function addDebtEntry(userId, e) {
+    return inTransaction(() => {
+      const res = _insertDebt.run({
+        user_id: userId,
+        counterparty: String(e.counterparty).trim(),
+        direction: e.direction,
+        amount: e.amount,
+        currency: e.currency || 'MNT',
+        entry_date: e.entryDate,
+        note: e.note ?? null,
+        linked: e.linkedTransactionId ?? null,
+      });
+      if (e.linkedTransactionId != null) setTransactionExclusion(userId, e.linkedTransactionId, true);
+      return _mapDebt(_getDebt.get(Number(res.lastInsertRowid), userId));
+    });
+  }
+
+  /**
+   * Өрийн бичлэг засах / хаах (settle) / дахин нээх (re-open).
+   * Хасалтын дүрэм:
+   *  - linked_transaction_id өөрчлөгдвөл: хуучныг сулла (өөр бичлэг лавлаагүй бол), шинийг хас.
+   *  - settled_transaction_id мөн адил.
+   *  - status 'settled' → settled_at тэмдэглэнэ; 'open' руу буцаавал settled_transaction_id-г
+   *    цэвэрлэж, түүний хасалтыг сулална.
+   * @returns {object|null} шинэчилсэн бичлэг, олдохгүй бол null
+   */
+  function updateDebtEntry(userId, id, patch) {
+    return inTransaction(() => {
+      const cur = _getDebt.get(id, userId);
+      if (!cur) return null;
+
+      const next = {
+        counterparty: patch.counterparty !== undefined ? String(patch.counterparty).trim() : cur.counterparty,
+        direction: patch.direction !== undefined ? patch.direction : cur.direction,
+        amount: patch.amount !== undefined ? patch.amount : Number(cur.amount),
+        currency: patch.currency !== undefined ? patch.currency : cur.currency,
+        entry_date: patch.entryDate !== undefined ? patch.entryDate : cur.entry_date,
+        note: patch.note !== undefined ? patch.note : cur.note,
+        status: patch.status !== undefined ? patch.status : cur.status,
+        linked: patch.linkedTransactionId !== undefined ? patch.linkedTransactionId : cur.linked_transaction_id,
+        settledTxn: patch.settledTransactionId !== undefined ? patch.settledTransactionId : cur.settled_transaction_id,
+      };
+      // 'open' руу буцаахад хаалтын гүйлгээний холбоос утгагүй болно
+      if (next.status === 'open') next.settledTxn = null;
+
+      const oldLinked = cur.linked_transaction_id;
+      const oldSettled = cur.settled_transaction_id;
+
+      db.prepare(`UPDATE debt_ledger SET counterparty=@counterparty, direction=@direction, amount=@amount,
+          currency=@currency, entry_date=@entry_date, note=@note, status=@status,
+          linked_transaction_id=@linked, settled_transaction_id=@settledTxn,
+          settled_at=CASE WHEN @status='settled' THEN COALESCE(settled_at, datetime('now')) ELSE NULL END
+        WHERE id=@id AND user_id=@user_id`)
+        .run({ ...next, id, user_id: userId });
+
+      // Шинээр холбогдсоныг хас; тасарсныг (өөр бичлэг лавлаагүй бол) сулла
+      if (next.linked != null) setTransactionExclusion(userId, next.linked, true);
+      if (next.settledTxn != null) setTransactionExclusion(userId, next.settledTxn, true);
+      if (oldLinked != null && oldLinked !== next.linked) releaseExclusionIfUnreferenced(userId, oldLinked, id);
+      if (oldSettled != null && oldSettled !== next.settledTxn) releaseExclusionIfUnreferenced(userId, oldSettled, id);
+
+      return _mapDebt(_getDebt.get(id, userId));
+    });
+  }
+
+  /** Устгах + энэ бичлэгээс үүдсэн хасалтуудыг буцаах (өөр бичлэг лавлаагүй бол). */
+  function deleteDebtEntry(userId, id) {
+    return inTransaction(() => {
+      const cur = _getDebt.get(id, userId);
+      if (!cur) return 0;
+      const changes = db.prepare('DELETE FROM debt_ledger WHERE id=? AND user_id=?').run(id, userId).changes;
+      if (changes) {
+        releaseExclusionIfUnreferenced(userId, cur.linked_transaction_id, id);
+        releaseExclusionIfUnreferenced(userId, cur.settled_transaction_id, id);
+      }
+      return changes;
+    });
+  }
+
   function close() { try { db.close(); } catch { /* ignore */ } }
 
   return {
@@ -985,7 +1235,10 @@ export function createDb(dbPath, opts = {}) {
     getDailyTransactionRows,
     listTransactions, getSummary,
     getMonthly, getByCategory, getCycleSpend, getPending, updateCategoryById, updateCategoryByPattern, updateTransactionFields,
-    autoClassifyStalePending,
+    autoClassifyStalePending, setTransactionExclusion, transactionBelongsToUser,
+    // өр төлбөрийн дэвтэр (debt_ledger)
+    listDebtEntries, getDebtEntry, getDebtBalances, addDebtEntry, updateDebtEntry, deleteDebtEntry,
+    isTransactionReferencedByOtherDebt,
     // real-time tracker: %-хуваарилалт
     getBudgetAllocations, saveBudgetAllocations,
     // overrides
