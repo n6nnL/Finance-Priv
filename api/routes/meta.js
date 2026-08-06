@@ -19,6 +19,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { listCategories } from '../categorize.js';
+import { isCategoryAllowedFor } from '../../config/categories.js';
 import { ubYmd, addDaysYmd, reconstructBalanceSeries, detectGaps } from '../balanceHistory.js';
 import { getLiveFxRates } from '../fx.js';
 import { logger } from '../logger.js';
@@ -215,6 +216,25 @@ export function createMetaRouter({ db, ai }) {
       const valid = listCategories();
       if (!valid.includes(category)) {
         return res.status(400).json({ status: 'error', error: `category нь дараахын нэг байх ёстой: ${valid.join(', ')}` });
+      }
+      // ---- Хамаарлын шалгалт (ХЭСЭГЧИЛСЭН — чадах хэрээр) ----
+      // ⚠️ Override нь ТОДОРХОЙ гүйлгээнд БИШ, мерчантын ХЭВ ШИНЖИД (pattern)
+      // хамаарна. Тухайн pattern ирээдүйд орлого ч, зарлага ч мөрөнд тохирч
+      // болох тул энд гүйлгээний type-ыг ТОДОРХОЙЛОХ БОЛОМЖГҮЙ — таамаглахгүй.
+      //
+      // Тиймээс зөвхөн ЭРГЭЛЗЭЭГҮЙ тохиолдлыг хаана: зөвхөн ОРЛОГЫН ангилал
+      // (ж: "Орлого"). Учир нь орлогын мөр classify.js-ийн income салаанд аль
+      // хэдийн автоматаар "Орлого" авдаг тул ийм override орлогод ИЛҮҮЦ, харин
+      // зарлагын мөрөнд тохиолдвол ЗӨВХӨН буруу үр дүн өгнө.
+      // Зарлагын ангиллыг энд хаахгүй — мерчантын override-ийн ХЭВИЙН хэрэглээ.
+      //
+      // Override lookup өөрөө (classify.js) type-г үл хардаг хэвээр — түүнд
+      // type predicate нэмэх нь ТУСДАА ажил (schema өөрчлөлт шаардана).
+      if (!isCategoryAllowedFor(category, 'expense')) {
+        return res.status(400).json({
+          status: 'error',
+          error: `"${category}" нь зөвхөн орлогын ангилал — мерчантын override-д ашиглаж болохгүй (орлого автоматаар ангилагдана)`,
+        });
       }
       const override = db.addOverride(req.userId, merchantPattern, category, friendlyName || null, defaultNote || null);
       return res.status(201).json({ status: 'ok', override });

@@ -40,6 +40,80 @@ export const CATEGORY_META = {
   'Бусад':                       { emoji: '📦', hex: '#8A8275' },
 };
 
+// ---- Ангиллын ХАМААРАЛ (applicability): аль төрлийн гүйлгээнд утгатай вэ ----
+// ★ single source. Гурван клиент (Dashboard/Discord/Telegram) БА API хоёул эндээс
+// шалгана — "Орлого" зарлагын мөрөнд, зарлагын ангилал орлогын мөрөнд гарахгүй.
+//
+// ОЛОНЛОГ (boolean БИШ) — учир нь зарим ангилал ХОЁУЛАНД утгатай:
+//   • 'Шилжүүлэг & гэр бүл' — гэр бүлийн шилжүүлэг хоёр тийш явна (ээжид өгөх ба
+//     ээжээс авах хоёулаа хэвийн)
+//   • 'Бусад' — хэрэглэгчийн ГАРААР сонгох гарц; хэзээ ч автоматаар оногдохгүй
+//     (categorize.js буцаахгүй) тул хоёуланд нээлттэй байх ёстой.
+//
+// ⚠️ CATEGORIES (жирийн мөрийн массив) БА CATEGORY_META-г ХЭВЭЭР үлдээв — bot-ууд
+//    ангиллыг CATEGORIES дахь ИНДЕКСЭЭР кодолдог тул дараалал ариун (§ notify.js).
+export const CATEGORY_APPLICABILITY = {
+  'Гадуур хооллолт':            ['expense'],
+  'Хүнсний зүйл':               ['expense'],
+  'Тээвэр':                     ['expense'],
+  'Орлого':                     ['income'],
+  'Шилжүүлэг & гэр бүл':       ['income', 'expense'],
+  'Захиалга & сервис':          ['expense'],
+  'Боловсрол':                   ['expense'],
+  'Чөлөөт цаг / зугаа цэнгэл':  ['expense'],
+  'Хувцас / гоо сайхан':       ['expense'],
+  'Бусад':                       ['income', 'expense'],
+};
+
+/**
+ * Тухайн ангилал энэ төрлийн гүйлгээнд зөвшөөрөгдөх үү — ★ ганц эх сурвалж.
+ * Picker (3 клиент) БА API-ийн баталгаажуулалт хоёул ЭНЭ функцээр шийднэ.
+ *
+ * ⚠️ FAIL-OPEN: metadata-гүй (шинээр нэмэгдсэн, хараахан бичигдээгүй) ангилал →
+ * ХОЁУЛАНД зөвшөөрнө. Ингэснээр шинэ ангилал нэмэхэд metadata мартагдвал бүх
+ * picker-ээс ЧИМЭЭГҮЙ алга болохгүй (алдаа нь харагдах ёстой, нуугдах биш).
+ * type мэдэгдэхгүй (null/undefined/танихгүй) бол мөн зөвшөөрнө — шүүлт нь
+ * мэдэгдэж буй type дээр л хатуу ажиллана.
+ *
+ * @param {string} category
+ * @param {'income'|'expense'|null|undefined} type
+ * @returns {boolean}
+ */
+export function isCategoryAllowedFor(category, type) {
+  if (type !== 'income' && type !== 'expense') return true; // type тодорхойгүй → хязгаарлахгүй
+  const allowed = CATEGORY_APPLICABILITY[category];
+  if (!allowed) return true; // metadata алга → fail-open
+  return allowed.includes(type);
+}
+
+/**
+ * Тухайн төрөлд тохирох ангиллын жагсаалт (дараалал ХАДГАЛАГДАНА).
+ * ⚠️ Bot-ууд ЭНЭ функцийг индекс кодлоход ШУУД ашиглаж БОЛОХГҮЙ — индекс
+ * шилжинэ. Тэнд listCategoriesWithIndexFor()-г ашиглана.
+ * @param {'income'|'expense'|null|undefined} type
+ */
+export function categoriesFor(type) {
+  return CATEGORIES.filter((c) => isCategoryAllowedFor(c, type));
+}
+
+/**
+ * ★ Bot-уудад ЗОРИУЛСАН: { category, index } хосууд — index нь БҮТЭН CATEGORIES
+ * массив дахь ЖИНХЭНЭ байрлал (шүүлтийн дараах байрлал БИШ).
+ *
+ * ⚠️ Discord/Telegram нь сонгосон ангиллыг customId/callback_data дотор ИНДЕКСЭЭР
+ * дамжуулж, CATEGORIES[idx]-ээр задалдаг. Хэрэв шүүсэн массивын шинэ индексийг
+ * кодловол товч бүр БУРУУ ангилал илгээнэ (алдаа мэдэгдэхгүй, applyToAll нь
+ * мерчантын бүх түүхэнд тараана). Тиймээс index-ийг ЭНД хамт буцаана.
+ *
+ * @param {'income'|'expense'|null|undefined} type
+ * @returns {Array<{category: string, index: number}>}
+ */
+export function listCategoriesWithIndexFor(type) {
+  return CATEGORIES
+    .map((category, index) => ({ category, index }))
+    .filter(({ category }) => isCategoryAllowedFor(category, type));
+}
+
 // type==='income' үед автоматаар оногдох ангилал
 export const INCOME_CATEGORY = 'Орлого';
 
@@ -135,4 +209,8 @@ export const OLD_TO_NEW = {
   other: 'Бусад',
 };
 
-export default { CATEGORIES, CATEGORY_META, CATEGORY_RULES, matchByKeywords, INCOME_CATEGORY, DEFAULT_CATEGORY, OLD_TO_NEW };
+export default {
+  CATEGORIES, CATEGORY_META, CATEGORY_RULES, matchByKeywords,
+  CATEGORY_APPLICABILITY, isCategoryAllowedFor, categoriesFor, listCategoriesWithIndexFor,
+  INCOME_CATEGORY, DEFAULT_CATEGORY, OLD_TO_NEW,
+};

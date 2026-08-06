@@ -72,17 +72,18 @@ D:\Claude\
 
 | Файл | Үүрэг |
 |---|---|
-| `categories.js` | **★ Single source:** 10 ангиллын нэр, emoji+hex metadata, keyword дүрэм, `matchByKeywords()`, `OLD_TO_NEW` mapping. Backend, listener, frontend ГУРВУУЛАА эндээс импортолно |
+| `categories.js` | **★ Single source:** 10 ангиллын нэр, emoji+hex metadata, keyword дүрэм, `matchByKeywords()`, `OLD_TO_NEW` mapping. **+ ХАМААРАЛ (applicability):** `CATEGORY_APPLICABILITY` (ангилал → `['income']`/`['expense']`/хоёул), `isCategoryAllowedFor(category, type)` (★ ганц предикат, fail-open), `categoriesFor(type)`, `listCategoriesWithIndexFor(type)` (bot-д — ЖИНХЭНЭ индекс хамт). Backend, listener, frontend ГУРВУУЛАА эндээс импортолно |
 | `transactionActions.js` | **★ Single source (үйлдлийн капабилити):** гүйлгээн дээр ЯМАР үйлдэл боломжтой, ЯМАР талбар асуухыг тодорхойлно. `availableActions(txn)`, `detailFieldFor(txn)` (POS→`merchantPlace`/"Газрын нэр", бусад→`note`/"Шалтгаан"), `isPosTxn`, `isPendingTxn`, `findAction`, `APPLY_TO_ALL_CONFIRM` (баталгаажуулалтын ижил текст). Discord/Telegram/Dashboard ГУРВУУЛАА эндээс уншина — өнгө/байрлал/API дуудлага энд ОРОХГҮЙ |
 | `tokenCrypto.js` | AES-256-GCM `encryptToken/decryptToken/isEncrypted`. Формат `enc:v1:<iv>:<tag>:<ct>`. `TOKEN_ENC_KEY` (64 hex) |
-| `txfields.js` | `detectIsPos(desc)` (BOM дүрэм), `isoDate(s, {anchored})` — parser БА API хоёул ашиглана |
+| `txfields.js` | `detectIsPos(desc)` (BOM дүрэм), `isoDate(s, {anchored})`, **`isoInstant(v)`** (имэйлийн `Date:` → ISO UTC, буруу/байхгүй бол `null`), **`ubTimeLabel(iso)`** (ISO UTC → УБ `HH:mm`, Intl `Asia/Ulaanbaatar` + ICU-гүй үед UTC+8 fallback) — parser, API, Discord, dashboard бүгд ашиглана |
 | `loadEnv.js` | Пакетгүй `.env` уншигч. Систем/pm2 env давамгайлна |
 
 ### 3.2 `src/` — listener (Gmail → parse → push)
 
 | Файл | Үүрэг |
 |---|---|
-| `index.js` | Entry. `processEmail()` — илгээгч шүүх → идэмпотент шалгах → parse → categorize → DB insert → API push. Heartbeat, graceful shutdown, `seedOwnerFromEnv()` |
+| `index.js` | Entry. `processEmail()` — илгээгч шүүх → идэмпотент шалгах → parse → categorize → DB insert → API push. Heartbeat, graceful shutdown, `seedOwnerFromEnv()`. **017:** `parsed.date` (имэйлийн `Date:` header) → `isoInstant()` → `emailReceivedAt` |
+| `payload.js` | **017:** API push payload бүтээх **цэвэр** функц (`buildPushPayload`) — `index.js` нь import хийхэд listener асдаг тул гэрээг тусад нь тестлэх боломж өгнө |
 | `imap-client.js` | `ImapListener` класс: XOAUTH2 холболт, IDLE, exponential-backoff reconnect, 50 мин тутам token refresh, catch-up (`lastSeenUid`), UIDVALIDITY өөрчлөлт зохицуулах. **Нэг instance = нэг хэрэглэгчийн inbox** |
 | `accounts.js` | API-ийн DB-г **шууд** (SELECT/UPDATE л) уншиж холбогдсон Gmail дансуудыг жагсаана, token decrypt хийнэ. Миграц ХИЙХГҮЙ |
 | `manager.js` | Reconcile loop: шинэ данс → асаах, салгагдсан → зогсоох, token солигдсон → restart. **Цэвэр логик** (env/config импортгүй → тестлэгдэнэ) |
@@ -100,7 +101,7 @@ D:\Claude\
 |---|---|
 | `server.js` | Prod entry: config → db → app → listen. Seed admin, `sweepStalePending()` (12 цаг тутам), graceful shutdown |
 | `app.js` | **`createApp(deps)` factory** — listen хийхгүй, тестүүд эндээс app авна. Route холболт, static serve, SPA fallback, 404/error handler |
-| `db.js` (54KB) | Бүх SQL энд. `createDb()` → миграц (14 үе шат, идемпотент) + ~50 функц |
+| `db.js` (54KB) | Бүх SQL энд. `createDb()` → миграц (17 үе шат, идемпотент) + ~50 функц |
 | `config.js` | `api/.env` унших, `required()`/`optional()`/`num()`/`bool()` |
 | `schema.js` | zod `TransactionSchema` + `normalizeBody()` (listener-ийн alias: `direction→type`, `accountTail→accountLast4`, `subject→raw`) |
 | `classify.js` | **Ангиллын шийдвэрийн дараалал:** override → income → keyword → NULL+pending(+AI санал) |
@@ -131,11 +132,11 @@ D:\Claude\
 | `Login.jsx` | Google-only sign-in. Callback-ийн `?error=` кодыг монгол мессеж болгоно |
 | `Summary.jsx` | 3 карт: энэ сарын орлого / зарлага / **Үлдэгдэл** (`/api/balance` — сарын cashflow БИШ) |
 | `Filters.jsx` | Хайлт, төрөл, олон ангилал, огнооны муж, дүнгийн муж |
-| `TransactionTable.jsx` | Жагсаалт + хуудаслалт (50/хуудас) + мөр дээр дарахад **expand панель** (`RowPanel`): ангилал chip-үүд, талбар засах (POS→Газрын нэр / бусад→Шалтгаан — `transactionActions`-оос), `applyToAll` checkbox (**default OFF**, ангилал өөрчлөгдөөгүй үед disabled), optimistic update + алдаанд rollback |
-| `PendingReview.jsx` | Ангилаагүй гүйлгээний шар banner + баталгаажуулах modal. Талбарын шошго `detailFieldFor()`-оос, `applyToAll` checkbox **default OFF** |
+| `TransactionTable.jsx` | Жагсаалт + хуудаслалт (50/хуудас) + мөр дээр дарахад **expand панель** (`RowPanel`): ангилал chip-үүд, талбар засах (POS→Газрын нэр / бусад→Шалтгаан — `transactionActions`-оос), `applyToAll` checkbox (**default OFF**, ангилал өөрчлөгдөөгүй үед disabled), optimistic update + алдаанд rollback. **Хасалтын тэмдэглэгээ** (016): `excluded_amount>0` мөрөнд teal badge — хэсэгчилсэн бол `↩ 55,000₮ буцаагдсан` + дүнгийн доор `цэвэр 35,000₮`, бүрэн бол `↩ Төсвөөс хасагдсан`. Мөрийн дүн **ҮРГЭЛЖ БҮТЭН** (үлдэгдэлд бүтнээрээ тоологдсон); тэмдэглэгээ нь ангиллын нийлбэр яагаад бага байгааг тайлбарлана. **017:** огнооны нүдэнд `title="Банкны мэдэгдэл ирсэн: 14:32"` (hover) + expand панелийн эхэнд `🕒 … 2026-08-05 · 14:32` (touch-д tooltip гардаггүй тул); `email_received_at` NULL бол **хоёулаа огт гарахгүй**, огноо хэвээр. **018:** `RowPanel`-ийн ангиллын chip-үүд мөрийн `row.type`-аар шүүгдэнэ (`isCategoryAllowedFor`) — зарлагад "Орлого", орлогод зарлагын ангилал ГАРАХГҮЙ |
+| `PendingReview.jsx` | Ангилаагүй гүйлгээний шар banner + баталгаажуулах modal. Талбарын шошго `detailFieldFor()`-оос, `applyToAll` checkbox **default OFF**. **018:** ангиллын chip-үүд мөрийн `t.type`-аар шүүгдэнэ (`isCategoryAllowedFor`) — зарлагад "Орлого" ГАРАХГҮЙ; AI санал ч мөн шүүгдэнэ (боломжгүй саналыг ★-аар онцлохгүй) |
 | `Analyze.jsx` | Сараар орлого/зарлага (1/3/12 сар), ангиллын задаргаа, `BalanceHistory`-г агуулна |
 | `BalanceHistory.jsx` | Өдөр тутмын **үлдэгдлийн график** (7х/30х/3с/6с/1ж preset эсвэл custom муж), цэг дээр даран тухайн өдрийн гүйлгээний задаргаа |
-| `DebtLedger.jsx` | **Өр төлбөрийн дэвтэр** — `Analyze.jsx`-ийн дотор (Календарь БИШ). Хоёр харагдац: «Үлдэгдэл» (хүн × валют бүрийн цэвэр өр — "Болд танд 30,000₮ өртэй") ба «Түүх» (бүх зээл/зээлүүлэлт/хаалт). Нэмэх форм (хэн/чиглэл/дүн/валют/огноо/тэмдэглэл + **холбох гүйлгээ сонгогч**), хаах/нээх/устгах. EUR-ийг эх валютаар харуулж, ханш байвал `≈ ₮` нэмнэ. **Бүх арифметик `lib/debt.js`-д** |
+| `DebtLedger.jsx` | **Өр төлбөрийн дэвтэр** — `Analyze.jsx`-ийн дотор (Календарь БИШ). Хоёр харагдац: «Үлдэгдэл» (хүн × валют бүрийн цэвэр өр — "Болд танд 30,000₮ өртэй") ба «Түүх» (бүх зээл/зээлүүлэлт/хаалт). Нэмэх форм (хэн/чиглэл/дүн/валют/огноо/тэмдэглэл + **холбох гүйлгээ сонгогч** + **«Энэ гүйлгээнээс тухайн хүний хэсэг»** талбар — 016, гүйлгээ сонгосон үед л гарна: default = бичлэгийн дүн, дээд хязгаар = гүйлгээний хасагдаагүй үлдэгдэл, «Ангилалд үлдэх таны зарлага» шууд харагдана, хэтэрвэл/валют зөрвөл Хадгалах товч түгждэг), хаах/нээх/устгах. Түүхийн мөрөнд `🔗 #id · 30,000₮ хасав`. EUR-ийг эх валютаар харуулж, ханш байвал `≈ ₮` нэмнэ. **Бүх арифметик `lib/debt.js`-д** |
 | `Calendar.jsx` | Сарын хуанли: цалингийн өдөр, захиалга, хувийн event. `Planner`, `Settings`, `BudgetTracker`, `ManualSavings`-г агуулна |
 | `Planner.jsx` | Циклийн төлөвлөгөө (цалин → захиалга → хуваарилалт → үлдэх) |
 | `BudgetTracker.jsx` | **Бодит зарцуулалт vs %-хуваарилалт** real-time. Bar ≥85% шар, >100% улаан. Debounced PUT |
@@ -147,8 +148,8 @@ D:\Claude\
 |---|---|
 | `api.js` | JWT client. Бүх дуудалт relative `/api/...`. 401 → refresh-ээр нэг удаа автомат дахин оролдоно. `consumeAuthFragment()` (Google callback-ийн `#token`). `patchCategory` / `updateFields` (тэмдэглэл+газрын нэр) / `updateNote` (back-compat) |
 | `budget.js` | Огноо/циклийн **цэвэр логик** (React-гүй, тестлэгдсэн). Санхүүгийн дүн ХАТУУ БИЧИГДЭХГҮЙ — settings-ээс дамжина |
-| `debt.js` | Өрийн **цэвэр логик** (React-гүй, тестлэгдсэн): `netBalances()` (хүн × валют — ⚠️ MNT ба EUR ХЭЗЭЭ Ч хооронд цэвэрших ЁСГҮЙ), `groupByCounterparty`, `totalsByCurrency`, `eurToMntDisplay` (ханшгүй бол **null**, хуурамч тоо гаргахгүй), `balancePhrase` (монгол өгүүлбэрийн бүтэц) |
-| `format.js` | `money()`, `catLabel/catEmoji/catHex`, `displayDesc()`, **дүнг нуух горим** (`applyAmountsMasked`, localStorage) |
+| `debt.js` | Өрийн **цэвэр логик** (React-гүй, тестлэгдсэн): `netBalances()` (хүн × валют — ⚠️ MNT ба EUR ХЭЗЭЭ Ч хооронд цэвэрших ЁСГҮЙ), `groupByCounterparty`, `totalsByCurrency`, `eurToMntDisplay` (ханшгүй бол **null**, хуурамч тоо гаргахгүй), `balancePhrase` (монгол өгүүлбэрийн бүтэц). **016:** `effectiveShare(entry)` (`exclusionShare ?? amount`), `remainingExcludable(txn)` (`amount − excluded_amount`, сөрөг болохгүй), `exclusionMarker(txn)` (`null` / `{full, excluded, net}`) |
+| `format.js` | `money()`, `catLabel/catEmoji/catHex`, `displayDesc()`, **дүнг нуух горим** (`applyAmountsMasked`, localStorage), **017:** `txnTimeLabel(row)` / `txnTimeTitle(row)` (`email_received_at` → УБ `HH:mm`; NULL бол `null`/`undefined` → tooltip огт нэмэгдэхгүй) |
 
 ### 3.5 `scripts/` — нэг удаагийн ба ops
 
@@ -238,13 +239,13 @@ D:\Claude\
 ### Transactions (`routes/transactions.js`)
 | Method | Зам | Тайлбар |
 |---|---|---|
-| POST | `/transactions` | **Ingest.** Machine (`X-API-Key`) үед `userId` ЗААВАЛ — дутуу бол 400 (owner fallback БАЙХГҮЙ). JWT үед `req.userId` |
-| GET | `/transactions` | Шүүлт: `q, type, category, from, to, minAmount, maxAmount, status, limit, offset` |
+| POST | `/transactions` | **Ingest.** Machine (`X-API-Key`) үед `userId` ЗААВАЛ — дутуу бол 400 (owner fallback БАЙХГҮЙ). JWT үед `req.userId`. **017:** сонголттой `emailReceivedAt` (ISO 8601 UTC, `z.string().datetime()`) — байхгүй/`null` бол NULL (хуучин listener payload татгалзагдахгүй), ISO биш утга → 400 |
+| GET | `/transactions` | Шүүлт: `q, type, category, from, to, minAmount, maxAmount, status, limit, offset`. Мөр бүр `SELECT *` — **017-оос хойш `email_received_at`** (ISO UTC эсвэл `null`) хариунд орно |
 | GET | `/transactions/pending` | Ангилаагүй жагсаалт |
-| GET | `/transactions/:id` | Нэг гүйлгээний одоогийн төлөв (bot-д) |
-| PATCH | `/transactions/:id/category` | Баталгаажуулах/ангилал засах. Body `{category, applyToAll?, merchantPlace?, note?}`. **`learn = !!applyToAll` ГАГЦХҮҮ** — `merchantPlace`/`note` дангаараа override үүсгэхээ БОЛЬСОН (өмнө нь авто-эскалаци хийдэг байсан). `applyToAll=true` → тэр мерчантын бүх мөр + `category_overrides`; `false` → зөвхөн тухайн мөр. Хоёр зам ч `manually_edited=1`, талбар нь `COALESCE` (хоосноор дарж бичихгүй) |
+| GET | `/transactions/:id` | Нэг гүйлгээний одоогийн төлөв (bot-д). Мөн `email_received_at` буцна |
+| PATCH | `/transactions/:id/category` | Баталгаажуулах/ангилал засах. Body `{category, applyToAll?, merchantPlace?, note?}`. **`learn = !!applyToAll` ГАГЦХҮҮ** — `merchantPlace`/`note` дангаараа override үүсгэхээ БОЛЬСОН (өмнө нь авто-эскалаци хийдэг байсан). `applyToAll=true` → тэр мерчантын бүх мөр + `category_overrides`; `false` → зөвхөн тухайн мөр. Хоёр зам ч `manually_edited=1`, талбар нь `COALESCE` (хоосноор дарж бичихгүй). **018 — ТӨРЛИЙН ШАЛГАЛТ:** гишүүнчлэлийн шалгалтын дараа мөрийн `row.type`-тай нийцлийг `isCategoryAllowedFor()`-оор шалгана; тохирохгүй бол **400** (ж: зарлаган мөрөнд `Орлого`). Клиентийн шүүлтэд НАЙДАХГҮЙ — шууд PATCH-ийг ЭНД хаана; татгалзсан хүсэлт override ч үүсгэхгүй |
 | PATCH | `/transactions/:id/note` | Тэмдэглэл/газрын нэр — **ангилал хөндөхгүй, override үүсгэхгүй**. Body `{note?, merchantPlace?}`: **body-д БАЙГАА талбарыг Л шинэчилнэ**; тодорхой хоосон string → `NULL` (утга устгах боломж); хоёулаа байхгүй → 400. Хариу `{status:'ok', id, note, merchantPlace}` |
-| PATCH | `/transactions/:id/exclusion` | **Төсвөөс хасах/буцаах.** Body `{excluded: boolean}` (boolean биш → 400). Хасахад `manually_edited=1`. ⚠️ ЗӨВХӨН төсөв/ангилал/шинжилгээнд нөлөөлнө — **үлдэгдэлд ХЭЗЭЭ Ч нөлөөлөхгүй**. Өрийн бичлэгтэй холбоотой гүйлгээний хасалтыг шууд буцаах гэвэл **409** (эхлээд дэвтрээс салгана) |
+| PATCH | `/transactions/:id/exclusion` | **Төсвөөс хасах/буцаах.** Body `{excluded: boolean}` (бүхлээр нь) **ЭСВЭЛ `{excludedAmount: number}`** (016 — хэсэгчилсэн, `[0, amount]`). Хоёулаа байхгүй / буруу төрөл → 400; `excludedAmount > amount` → **400**. Хасалт байхад `manually_edited=1`. Хариу `{excluded (=БҮРЭН хасагдсан эсэх), excludedAmount, netAmount, manuallyEdited}`. ⚠️ ЗӨВХӨН төсөв/ангилал/шинжилгээнд нөлөөлнө — **үлдэгдэлд ХЭЗЭЭ Ч нөлөөлөхгүй**. Өрийн бичлэгтэй холбоотой гүйлгээний хасалтыг гараар **өөрчлөх** гэвэл **409** (эхлээд дэвтрээс салгана; утга өөрчлөгдөхгүй no-op дуудалт зөвшөөрөгдөнө) |
 
 ### Meta / Analytics (`routes/meta.js`)
 | Method | Зам | Тайлбар |
@@ -255,9 +256,9 @@ D:\Claude\
 | GET | `/balance` | **Одоогийн үлдэгдэл** = сүүлийн `account_balance`-тай мөр. Байхгүй бол `null` |
 | GET | `/balance-history?range=90d\|from=&to=` | Өдөр тутмын үлдэгдлийн сэргээлт + өдөр бүрийн гүйлгээ (drill-down) + `gaps`. Anchor байхгүй бол `available:false` (**хуурамч тоо хэзээ ч гаргахгүй**) |
 | GET | `/fx-rates` | Амьд USD/EUR→MNT (провайдер унавал 502) |
-| GET | `/categories` | 10 ангилал |
-| POST | `/ai-categorize` | AI санал (дотоод) |
-| GET/POST | `/overrides` | Learned override жагсаах/нэмэх |
+| GET | `/categories` | 10 ангилал — **ШҮҮГДЭХГҮЙ** (бүтэн жагсаалт). Төрлөөр шүүх нь picker-ийн ажил (`isCategoryAllowedFor`), учир нь энэ жагсаалтыг App нэг л удаа татаж, мөр бүрд дахин ашигладаг |
+| POST | `/ai-categorize` | AI санал (дотоод). **018:** prompt-ын нэр дэвшигчээс зөвхөн орлогын ангилал ХАСАГДСАН — AI салаа нь зөвхөн зарлагын мөрөнд хүрдэг тул "Орлого" санал ҮРГЭЛЖ буруу байсан |
+| GET/POST | `/overrides` | Learned override жагсаах/нэмэх. **018 (ХЭСЭГЧИЛСЭН шалгалт):** override нь тодорхой гүйлгээнд БИШ, мерчантын хэв шинжид хамаардаг тул `type` тодорхойлох БОЛОМЖГҮЙ — таамаглахгүй. Зөвхөн эргэлзээгүйг хаана: **зөвхөн орлогын ангилал → 400** (орлого автоматаар ангилагддаг тул илүүц, зарлагад буруу). Зарлагын ангилал нь override-ийн ХЭВИЙН хэрэглээ — хөндөөгүй |
 
 ### Budget (`routes/budget.js`)
 `GET/PUT /settings` · `GET /budget-status?cycle=current` · `GET/PUT /budget-allocations` ·
@@ -277,13 +278,23 @@ Balance = валют тус бүрээр тэмдэгт нийлбэр — **bac
 |---|---|---|
 | GET | `/debt-ledger` | Жагсаалт (шинэ нь эхэнд). Шүүлт: `?counterparty=`, `?status=open\|settled` |
 | GET | `/debt-ledger/balances` | **Хүн × валют** тус бүрийн цэвэр үлдэгдэл (зөвхөн `open`). `[{counterparty, currency, net, direction}]` — `net>0` = тэр хүн ХЭРЭГЛЭГЧИД өртэй. Тэг болж цэвэршсэн хосыг буцаахгүй |
-| POST | `/debt-ledger` | `{counterparty, direction:'i_lent'\|'i_borrowed', amount>0, currency:'MNT'\|'EUR', entryDate, note?, linkedTransactionId?}`. Холбоос өгвөл тэр гүйлгээг **атомоор** төсвөөс хасна |
-| PATCH | `/debt-ledger/:id` | Засах / хаах (`{status:'settled', settledTransactionId?}`) / дахин нээх. Холбоос солих/салгах үед хасалтыг зөв тавьж/буцаана |
-| DELETE | `/debt-ledger/:id` | Устгах + энэ бичлэгээс үүдсэн хасалтыг буцаана |
+| POST | `/debt-ledger` | `{counterparty, direction:'i_lent'\|'i_borrowed', amount>0, currency:'MNT'\|'EUR', entryDate, note?, linkedTransactionId?, exclusionShare?}`. Холбоос өгвөл тэр гүйлгээнээс **ЭНЭ бичлэгийн хувь хэмжээг** (`exclusionShare ?? amount`) **атомоор** төсвөөс хасна |
+| PATCH | `/debt-ledger/:id` | Засах / хаах (`{status:'settled', settledTransactionId?}`) / дахин нээх / **`exclusionShare` засах**. Холбоос солих/салгах/хувь хэмжээ өөрчлөгдөх бүрд хөндөгдсөн БҮХ гүйлгээний хасалт дахин тооцоологдоно |
+| DELETE | `/debt-ledger/:id` | Устгах + хөндөгдсөн гүйлгээг дахин тооцоолно (зөвхөн энэ бичлэгийн хувь хэмжээ чөлөөлөгдөнө) |
 
-⚠️ **Хасалт буцаах хамгаалалт:** гүйлгээг **ӨӨР** өрийн бичлэг лавлаж байвал хасалт буцаагдахгүй
-(нэг зарлагыг хоёр хүнд хуваасан тохиолдол). `isTransactionReferencedByOtherDebt()` шалгана.
-`debt_ledger` + `transactions` хоёуланд бичих үйлдэл бүр **нэг SQLite транзакцид** ороосон.
+⚠️ **Олон бичлэг = НИЙЛБЭР (016).** Нэг гүйлгээг олон өрийн бичлэг лавлаж болно
+(90,000₮ хоолны данс: Болд 30к + Гана 25к). Гүйлгээний `excluded_amount` = холбогдсон
+БҮХ бичлэгийн хувь хэмжээний нийлбэр. Нэг нь салахад **зөвхөн түүний хувь** хасагдаж,
+үлдсэн нь **лавлагаануудаас дахин тооцоологдоно** (`recomputeTransactionExclusion()` —
+тоолуур нэмэгдүүлдэггүй тул retry/давхар дуудалтад ч зөв). `isTransactionReferencedByOtherDebt()`
+нь гараар хасалт өөрчлөхийг хориглох (409) шалгалтад үлдсэн.
+
+⚠️ **Валют:** өрийн бичлэг ба холбогдох гүйлгээний валют ЗААВАЛ таарна
+(20 EUR-ыг MNT гүйлгээнээс хасах боломжгүй) — таарахгүй бол **400 `CURRENCY_MISMATCH`**.
+Хувь хэмжээний нийлбэр гүйлгээний дүнг давбал **400 `OVER_EXCLUSION`**. Хоёулаа
+`db.js`-ийн `ExclusionError`-оор шидэгдэж, SQLite транзакц **бүхэлдээ rollback** болно
+(тал дутуу төлөв үүсэхгүй). `debt_ledger` + `transactions` хоёуланд бичих үйлдэл бүр
+**нэг SQLite транзакцид** ороосон.
 
 ### Telegram (`routes/telegram.js`, JWT-only)
 `POST /telegram/link-code` (6 оронтой, 10 мин) · `POST /telegram/unlink`
@@ -301,7 +312,7 @@ Balance = валют тус бүрээр тэмдэгт нийлбэр — **bac
 
 | Хүснэгт | Гол багана |
 |---|---|
-| `transactions` | `user_id, amount, currency, txn_date, type, category, status, description, merchant_place, is_pos, note, ai_suggested_category, ai_confidence, manually_edited, account_balance, **excluded_from_budget**, message_id (UNIQUE)` |
+| `transactions` | `user_id, amount, currency, txn_date, type, category, status, description, merchant_place, is_pos, note, ai_suggested_category, ai_confidence, manually_edited, account_balance, **email_received_at** (TEXT NULL — банкны мэдэгдэл ирсэн цаг, ISO 8601 **UTC**; имэйлийн `Date:` header, 017), **excluded_amount** (REAL NOT NULL DEFAULT 0, `CHECK ≥0`), **excluded_from_budget** (=БҮРЭН хасагдсан эсэх, `excluded_amount ≥ amount` үед 1 — бичилт бүр дээр дахин тооцоологдоно), message_id (UNIQUE)` |
 | `category_overrides` | `user_id, merchant_pattern, category, friendly_name, default_note` — `UNIQUE(user_id, merchant_pattern)` |
 | `users` | `id, email UNIQUE, password_hash, role, google_sub, picture` |
 | `user_settings` | `user_id PK, data (JSON)` |
@@ -312,15 +323,30 @@ Balance = валют тус бүрээр тэмдэгт нийлбэр — **bac
 | `telegram_link_codes` | `code PK, user_id, expires_at, used` |
 | `telegram_notifications` | `(transaction_id, chat_id) PK, message_id` |
 | `manual_ledger_entries` | `user_id, entry_date, type, amount, currency, amount_eur, exchange_rate, note` |
-| `debt_ledger` | `user_id, counterparty, direction ('i_lent'\|'i_borrowed'), amount (CHECK>0), currency ('MNT'\|'EUR'), entry_date, note, status ('open'\|'settled'), linked_transaction_id (→transactions, ON DELETE SET NULL), settled_transaction_id (мөн адил), created_at, settled_at` |
+| `debt_ledger` | `user_id, counterparty, direction ('i_lent'\|'i_borrowed'), amount (CHECK>0), currency ('MNT'\|'EUR'), entry_date, note, status ('open'\|'settled'), linked_transaction_id (→transactions, ON DELETE SET NULL), settled_transaction_id (мөн адил), **exclusion_share** (REAL NULL — холбосон гүйлгээнээс эзлэх хэсэг; NULL = `amount`), created_at, settled_at` |
 
-**Миграцын түүх (15):** 001–004 үндсэн + dashboard/AI/note · **005** auth+multi-tenant
+**Миграцын түүх (17):** 001–004 үндсэн + dashboard/AI/note · **005** auth+multi-tenant
 (`user_id` бүх хүснэгтэд, `category_overrides`-г table-rebuild хийсэн) · 006 settings+events ·
 007 google_sub/picture + google_tokens · 008 budget_allocations · 009 Gmail multi-tenant
 баганууд + **token encryption backfill** · 010 Telegram хүснэгтүүд · 011 `gmail_oauth_client`
 marker · 012 `account_balance` · 013 `manual_ledger_entries` · 014 `currency` багана ·
 **015** `debt_ledger` хүснэгт (+3 индекс) БА `transactions.excluded_from_budget`
-(`INTEGER NOT NULL DEFAULT 0` — хуучин мөр бүгд 0, **backfill шаардлагагүй**).
+(`INTEGER NOT NULL DEFAULT 0` — хуучин мөр бүгд 0, **backfill шаардлагагүй**) ·
+**016** ХЭСЭГЧИЛСЭН ХАСАЛТ: `transactions.excluded_amount` (`REAL NOT NULL DEFAULT 0
+CHECK (excluded_amount >= 0)`) + **backfill** `UPDATE … SET excluded_amount = amount
+WHERE excluded_from_budget = 1` (хуучин бүрэн хасагдсан мөр зан төлөвөө ЯГ хадгална),
+`debt_ledger.exclusion_share` (`REAL NULL`), БА багана хоорондын хязгаарын **2 trigger**
+(`trg_txn_excluded_amount_ins/upd` — `NEW.excluded_amount > NEW.amount + 1e-6` үед
+`RAISE(ABORT)`; SQLite-д cross-column CHECK бичих боломжгүй тул trigger).
+`excluded_from_budget` **УСТГААГҮЙ** — "бүрэн хасагдсан" гэсэн уламжлагдсан туг болж
+бичилт бүр дээр дахин тооцоологдоно (хуучин уншигч код бүр зөв хэвээр). ·
+**017** МЭДЭГДЭЛ ИРСЭН ЦАГ: `transactions.email_received_at` (`TEXT`, nullable,
+DEFAULT NULL, **backfill ХИЙХГҮЙ** — 012-ын `account_balance`-тай ижил философи).
+Голомтын имэйлийн BODY-д зөвхөн ОГНОО (цаггүй) байдаг тул цагийн эх сурвалж нь
+Gmail имэйлийн `Date:` header (`simpleParser` → `parsed.date`). ISO 8601 **UTC**-ээр
+хадгална; дэлгэц/bot дээр л УБ (Asia/Ulaanbaatar) болгож хөрвүүлнэ.
+⚠️ `txn_date` **ХӨНДӨГДӨӨГҮЙ** — огноо (YYYY-MM-DD) хэвээрээ (budgetCycle.js /
+balanceHistory.js / `/balance-history` бүгд түүнд тулгуурладаг).
 
 PRAGMA: `journal_mode=WAL`, `synchronous=NORMAL`, `foreign_keys=ON`.
 WAL нь **олон процесс** (api + listener + 2 bot) нэг файлыг зэрэг ашиглах боломж өгдөг.
@@ -383,6 +409,31 @@ WAL нь **олон процесс** (api + listener + 2 bot) нэг файлы�
   тохиолдолд "Шалтгаан" асууна.
 - **"Бусад"-ыг автоматаар оноохгүй** — зөвхөн хэрэглэгч сонгоно (эсвэл 3 хоногийн sweep).
 
+### 8.1 Ангиллын ХАМААРАЛ (applicability) — аль ангилал аль төрлийн гүйлгээнд
+
+`CATEGORY_APPLICABILITY` (`config/categories.js`) нь ангилал бүр ЯМАР төрлийн
+гүйлгээнд утгатайг заана. Boolean БИШ, **олонлог** — учир нь зарим нь хоёуланд:
+
+| Ангилал | Хамаарал | Яагаад |
+|---|---|---|
+| `Орлого` | **зөвхөн `income`** | Зарлагын мөрөнд утгагүй — энэ нь засварласан гол алдаа |
+| `Шилжүүлэг & гэр бүл` | **`income` + `expense`** | Гэр бүлийн шилжүүлэг ХОЁР ТИЙШ явна (ээжид өгөх / ээжээс авах) |
+| `Бусад` | **`income` + `expense`** | Хэрэглэгчийн ГАРААР сонгох гарц — автоматаар хэзээ ч оногдохгүй |
+| үлдсэн 7 | зөвхөн `expense` | Хоол, тээвэр, хувцас г.м зөвхөн зарлага |
+
+**Ганц предикат:** `isCategoryAllowedFor(category, type)` — гурван клиентийн picker
+БА API-ийн баталгаажуулалт бүгд ЭНЭ функцээр шийднэ (дүрэм давхардуулахгүй).
+
+- ⚠️ **FAIL-OPEN:** metadata-гүй ангилал → хоёуланд зөвшөөрнө. Шинэ ангилал нэмээд
+  applicability бичихээ мартвал picker-үүдээс ЧИМЭЭГҮЙ алга болохгүй.
+- `type` тодорхойгүй (`null`/танихгүй) → хязгаарлахгүй.
+- **МИГРАЦ ХИЙГЭЭГҮЙ:** өмнө нь "хууль бус" хослолтой болсон мөрүүд (ж: `income` +
+  `Тээвэр`) ХЭВЭЭР үлдэнэ. `catLabel/catEmoji/catHex` нь applicability харахгүй тул
+  жагсаалтад хэвийн харагдана; зөвхөн ЗАСВАРЫН panel-д тухайн утга сонголтод
+  байхгүй тул идэвхтэй товч харагдахгүй (шалгасан — §12).
+- Override-ийн type-predicate нь ЭНД ОРООГҮЙ (`classify.js`-ийн override lookup
+  type үл харна) — тусдаа ажил, schema өөрчлөлт шаардана.
+
 ---
 
 ## 9. Bot-ууд
@@ -401,6 +452,12 @@ Discord / Telegram / Website гурвуулан **ижил чадвартай**.
 | Утга **устгах** | хоосон modal submit | `«-»` гэж бичих | талбарыг хоослох |
 | `applyToAll` (learned override) | ✅ | ✅ | ✅ |
 | `applyToAll` **default OFF + тодорхой баталгаажуулалт** | Тийм/Үгүй товч | Тийм/Үгүй товч | checkbox |
+| **Ангилал нь гүйлгээний ТӨРЛӨӨР шүүгдэнэ (018)** | ✅ | ✅ | ✅ |
+
+⚠️ **018 — ангиллын сонголт төрлөөр шүүгдэнэ.** Гурван клиент ЦӨМ `isCategoryAllowedFor()`
+(★ `config/categories.js`)-оор шүүнэ: зарлаган мөрөнд **"Орлого" ГАРАХГҮЙ** (9 сонголт),
+орлогын мөрөнд зөвхөн 3 (Орлого / Шилжүүлэг & гэр бүл / Бусад). Сервер тал ч мөн
+шалгана (`PATCH /:id/category` → 400) — UI-д л байгаа хамгаалалт нь хамгаалалт БИШ.
 
 ⚠️ **`applyToAll` хэзээ ч автоматаар true болохгүй.** Хэрэглэгч `APPLY_TO_ALL_CONFIRM.question`
 ("Дараагийн бүх ижил мерчантад хэрэглэх үү?")-д тодорхой "Тийм" гэж хариулсан үед л override
@@ -410,6 +467,10 @@ Discord / Telegram / Website гурвуулан **ижил чадвартай**.
 - DB-г polling (эхлэхдээ одоогийн max id-ээс → хуучин flood мэдэгдэхгүй), `.bot-state.json`.
 - classified → embed + "✏️ Ангилал засах" + "📝 <талбар> засах"; pending → embed +
   ангиллын товч (2×5) + "📝 <талбар> засах".
+- **017: мэдэгдэлд ЦАГ.** Embed-ийн «Огноо» талбар нь `fmtDateTime(tx)` — `email_received_at`
+  утгатай бол `2026-08-05 · 14:32` (ISO UTC → УБ), NULL бол **зөвхөн огноо**
+  (хуурамч "00:00" ХЭЗЭЭ Ч гарахгүй). Хөрвүүлэлт нь дундын `config/txfields.js`-ийн
+  `ubTimeLabel()` — Intl (`Asia/Ulaanbaatar`), ICU-гүй орчинд UTC+8 fallback.
 - **Ангиллын урсгал:** товч/select → modal (талбар) → **applyToAll Тийм/Үгүй товч** →
   `PATCH .../category` → мессежийг edit. Утга нь customId 100 тэмдэгтэд багтахгүй тул
   `pendingConfirm` Map-д түр хадгална (restart-д алдагдвал "хугацаа дууссан" гэж эелдэг унана).
@@ -479,20 +540,20 @@ Discord / Telegram / Website гурвуулан **ижил чадвартай**.
 
 ---
 
-## 12. Тест (нийт **235**, бүгд `node --test`)
+## 12. Тест (нийт **264**, бүгд `node --test`)
 
 ⚠️ Root дээрх `npm test` (= `node --test`) нь **recursive** тул доорх БҮХ багцыг
-(api/telegram/discord/dashboard оруулаад) нэг дор ажиллуулж **235** гэж мэдээлдэг.
+(api/telegram/discord/dashboard оруулаад) нэг дор ажиллуулж **300** гэж мэдээлдэг.
 Багц бүрийг тусад нь ажиллуулах командыг баруун баганад бичив.
 
 | Багц | Тоо | Ажиллуулах |
 |---|---|---|
-| API | **150** (api 12, auto-classify 3, balance-history 18, balance 6, budget-status 12, budget 8, dashboard 17, **debt-ledger 19**, gmail-auth 12, google-auth 11, google-provider 3, manual-savings 16, telegram 6, token-crypto 7) | `cd api && npm test` |
-| Дундын (`test/`) | **33** (golomt 12, categorize 10, shared 4, transactionActions 7) | `node --test test/` |
+| API | **179** (api 12, auto-classify 3, balance-history 18, balance 6, budget-status 12, budget 8, **category-applicability 11**, dashboard 17, **debt-ledger 19**, gmail-auth 12, google-auth 11, google-provider 3, manual-savings 16, **partial-exclusion 12**, **email-received-at 6**, telegram 6, token-crypto 7) | `cd api && npm test` |
+| Дундын (`test/`) | **51** (golomt 12, categorize 10, shared 4, transactionActions 7, **emailReceivedAt 5**, **categoryApplicability 9**, **categoryButtonIndex 4**) | `node --test test/` |
 | Listener модуль | **12** (accounts 4, manager 4, balanceAlert 4) | `node --test src/*.test.js` |
-| Telegram | **12** (db 10, isolation 2) | `cd telegram && npm test` |
-| Dashboard цэвэр логик | **23** (budget 12, **debt 11**) | `node --test dashboard/src/lib/*.test.js` |
-| Discord | **5** (categories) | `cd discord && npm test` |
+| Telegram | **18** (db 10, isolation 2, **category-filter 6**) | `cd telegram && npm test` |
+| Dashboard цэвэр логик | **26** (budget 12, **debt 14**) | `node --test dashboard/src/lib/*.test.js` |
+| Discord | **14** (categories 5, **notify 3**, **category-filter 6**) | `cd discord && npm test` |
 
 Загвар: API тестүүд жинхэнэ `createApp()`-г `:memory:` DB дээр ачаалж, HTTP түвшинд шалгана
 (mock биш). Цэвэр логик (budgetCycle, balanceHistory, budget.js, manager.js,
@@ -506,7 +567,38 @@ transactionActions.js) нь dependency-injected/цэвэр тул тусад н�
 `monthly`/`budget-status`-аас алга болох ч `/balance` БА `balance-history`-д хэвээр** ·
 `transactions` жагсаалтаас алга болохгүй (буцааж асаах боломж) · холбох→хасалт,
 settle+орлого холбох→орлогын хасалт, re-open→буцаалт · **"өөр бичлэг лавлаж байвал
-хасалт буцаахгүй"** хамгаалалт · cross-user унших/засах/холбох бүгд татгалзагдана.
+ЗӨВХӨН тэр бичлэгийн хувь хэмжээ чөлөөлөгдөнө"** (016-д дүнгээр шинэчлэгдсэн) ·
+cross-user унших/засах/холбох бүгд татгалзагдана.
+
+`partial-exclusion.test.js` (016) ★: **файл DB дээр миграц идемпотент + backfill зөв**
+(015-ын төлөвийг сэргээж шалгадаг) · **бүрэн хасалт 4 query-д БҮГДЭД нь 015-тай ЯГ ижил
+үр дүн** (backward-compat, `count` хүртэл) · **хэсэгчилсэн: 90к-аас 55к → ангилал 45к,
+`/balance` БА `/balance-history` `deepEqual`-ээр ЯГ ТАГ хэвээр, жагсаалтад 90к** ·
+**олон бичлэг 30к+25к=55к, нэгийг салгахад 30к ҮЛДЭНЭ** · `exclusionShare` override ·
+хэтрүүлэх → 400 + rollback (бичлэг ч үүсэхгүй), ангиллын дүн сөрөг болохгүй ·
+DB trigger/CHECK ч хэтрэлт/сөрөг дүнг зөвшөөрөхгүй · валют зөрөх холбоос → 400 ·
+isolation · **бодит "хуваасан хоол" хувилбар** (90к → Болд 30к + Гана 25к → цэвэр 35к →
+Гана салахад 60к, үлдэгдэл хоёуланд нь хөндөгдөөгүй).
+
+`emailReceivedAt.test.js` + `email-received-at.test.js` + `discord/test/notify.test.js`
+(017): жинхэнэ `simpleParser`-ээр имэйл задалж `Date:` header → ISO UTC · header
+**байхгүй** имэйл → `null` (одоогийн цагаар нөхөхгүй, throw ч хийхгүй) · push payload-д
+`emailReceivedAt` орсон бөгөөд `date` нь ОГНОО хэвээр · миграц additive/идемпотент,
+хуучин мөр NULL хэвээр · POST → GET (жагсаалт ба `/:id`) хоёуланд буцна · `emailReceivedAt`-гүй
+(хуучин listener) push → 201 · ISO биш string → 400 · two-user isolation ·
+Discord embed-д NULL үед цаг нэмэхгүй, утгатай үед УБ HH:mm (шөнө дунд давсан кейс).
+
+`categoryApplicability.test.js` + `categoryButtonIndex.test.js` + `api/test/category-applicability.test.js`
++ `discord|telegram/…/category-filter.test.js` (018) ★: `isCategoryAllowedFor` — Орлого
+зөвхөн income · Шилжүүлэг/Бусад хоёуланд · 7 нь зөвхөн expense · **танихгүй ангилал
+fail-open** · type тодорхойгүй үед хязгаарлахгүй · `categoriesFor` дараалал хадгална
+(expense 9 / income 3) · **★ ИНДЕКСИЙН УРХИ:** шүүсэн олонлогоос кодолсон товчийг
+задлахад ЗӨВ нэр гарна (Discord ба Telegram, `c`/`ec` хоёул) — "Орлого"-гийн индекс
+шүүлтийн дараа ч **3 хэвээр** (pos=0 БОЛОХГҮЙ), builder-ийн бодит гаралт дээр шошго =
+задарсан ангилал · эгнээнд ≤5 товч, хоосон эгнээгүй · `type`-гүй хуучин дуудлага → 10
+товч (fail-open) · **сервер backstop:** зарлага+Орлого → 400 (мөр хөндөгдөхгүй,
+override ч үүсэхгүй), орлого+Тээвэр → 400, хоёуланд тохирох → 200, `/overrides`-д
+зөвхөн орлогын ангилал → 400 · `GET /api/categories` **10-аа буцаасан хэвээр**.
 
 ---
 
@@ -550,18 +642,65 @@ settle+орлого холбох→орлогын хасалт, re-open→буц
 | Rate limiter | In-memory — олон instance/cluster-т Redis рүү шилжих хэрэгтэй болно |
 | Root `golomt.js` | Repo-ийн үндэст байгаа `golomt.js` нь **хуучин, ашиглагдахгүй хуулбар** (зөвхөн EASYINFO загварыг мэднэ). Бодит parser бол [`src/parsers/golomt.js`](src/parsers/golomt.js) (5 загвар). Ямар ч код үүнийг импортлодоггүй — цэвэрлэх боломжтой |
 | Google Sheets | Хуучин баримтад дурдагддаг ч ашиглагдахгүй. Бодит storage бол SQLite. (Python legacy файлууд одоо repo-д БАЙХГҮЙ) |
-| ⚠️ **`excluded_from_budget` = ЗӨВХӨН шинжилгээ** | Найзын билетийг картаараа авахад мөнгө **бодитоор** дансаас гардаг тул `balance`/`balance-history`-д **ЗААВАЛ** тоологдоно; зөвхөн "Тээвэр 600% хэтэрсэн" гэх ангиллын гажуудлыг арилгахаар төсөв/шинжилгээнээс хасагдана. Шинэ analytics query нэмэхдээ `AND excluded_from_budget = 0` бичихээ **бүү мартаарай**; эсрэгээр **үлдэгдлийн** query-д ХЭЗЭЭ Ч бүү нэм. `buildWhere(userId, {budgetOnly:true})` нь энэ шүүлтийг өгнө — `listTransactions` түүнийг ЗОРИУД дамжуулдаггүй (хэрэглэгч хасагдсан мөрөө хараад буцааж асаах ёстой) |
-| Өрийн холбоос ба хасалт | Нэг гүйлгээг **олон** өрийн бичлэг лавлаж болно (нэг зарлагыг хэд хэдэн хүнд хуваасан). Тиймээс холбоос тасрахад хасалтыг **шууд бүү буцаа** — `isTransactionReferencedByOtherDebt()`-ээр өөр лавлагаа байгаа эсэхийг эхлээд шалга |
+| ⚠️ **Хасалт = ЗӨВХӨН шинжилгээ** | Найзын билетийг картаараа авахад мөнгө **бодитоор** дансаас гардаг тул `balance`/`balance-history`-д **ЗААВАЛ** тоологдоно; зөвхөн "Тээвэр 600% хэтэрсэн" гэх ангиллын гажуудлыг арилгахаар төсөв/шинжилгээнээс хасагдана. Шинэ analytics query нэмэхдээ **`NET_AMOUNT` (`amount - COALESCE(excluded_amount,0)`) + `AND excluded_from_budget = 0`** хоёуланг бичихээ бүү мартаарай; эсрэгээр **үлдэгдлийн** query-д ХЭЗЭЭ Ч бүү нэм (тэнд ҮРГЭЛЖ бүтэн `amount`). `buildWhere(userId, {budgetOnly:true})` нь шүүлтийг өгнө — `listTransactions` түүнийг ЗОРИУД дамжуулдаггүй, **бас net хийдэггүй** (хэрэглэгч бүтэн гүйлгээгээ хараад удирдах ёстой) |
+| ⚠️ **016: шүүлт БИШ, ЦЭВЭР НИЙЛБЭР** | 4 query (`getSummary`/`getMonthly`/`getByCategory`/`getCycleSpend`) нь одоо мөрийг хаядаггүй, **`amount − excluded_amount`-ыг нийлбэрлэдэг**. `excluded_from_budget = 0` шүүлт нь ҮЛДСЭН — БҮРЭН хасагдсан мөр (цэвэр дүн нь аль хэдийн 0) `count`/бүлэгт орж 015-ын зан төлөвийг эвдэхээс сэргийлнэ. Хэсэгчилсэн мөр шүүгдэхгүй, зөвхөн дүн нь багасна. Хоёрын **аль нэгийг** орхивол тоо чимээгүй гажина |
+| ⚠️ **016: олон бичлэг — ДАХИН ТООЦООЛ** | Гүйлгээний `excluded_amount` = холбогдсон БҮХ өрийн бичлэгийн `exclusionShare ?? amount`-ын нийлбэр. Холбоос/дүн өөрчлөгдөх бүрд `recomputeTransactionExclusion()` нь лавлагаануудаас **шинээр** тооцоолно (тоолуур нэмэгдүүлэх/хасах БИШ → retry, давхар дуудалт, хэсэгчилсэн бүтэлгүйтэлд ч зөв). Нэг бичлэг салахад бусдын хувь хэмжээг **ХЭЗЭЭ Ч 0 болгож бүү цэвэрлэ**. Хэтрэлт/валют зөрөлт → `ExclusionError` → транзакц бүхэлдээ rollback → route 400 |
+| ⚠️ **018: ангиллын picker нь ТӨРЛӨӨР шүүгддэг** | Ангиллын сонголт бүр (Dashboard `RowPanel` + `ConfirmModal`, Discord товч/select, Telegram keyboard) `isCategoryAllowedFor(category, row.type)`-оор шүүгдэнэ. Шинэ picker/клиент нэмэхдээ **бүтэн `CATEGORIES`-г шууд рендерлэхийг ХОРИГЛОНО** — `categoriesFor(type)` (нэрээр кодлодог UI) эсвэл `listCategoriesWithIndexFor(type)` (индексээр кодлодог bot) ашиглана. Сервер тал ч шалгана (`PATCH /:id/category` → 400) |
+| ⚠️ **018: BOT-ЫН ИНДЕКСИЙН УРХИ** | Discord/Telegram нь сонгосон ангиллыг customId/`callback_data` дотор **бүтэн `CATEGORIES` массив дахь ИНДЕКСЭЭР** дамжуулж, `categoryByIndex()`-ээр задалдаг (мөрийн урт хязгаартай тул). Хэрэв `CATEGORIES.filter(...)` хийгээд **шүүсэн массивын шинэ индексийг** кодловол товч бүр **БУРУУ ангилал** илгээнэ — алдаа мэдэгдэхгүй, `applyToAll` нь мерчантын БҮХ түүхэнд тараана. Тиймээс `listCategoriesWithIndexFor(type)` нь `{category, index}` хос буцаана: **`index`-ийг кодол, давталтын байрлалыг (pos) зөвхөн эгнээ таслахад ашигла**. Эгнээ таслах давталтыг ч **шүүсэн** жагсаалтын уртаар бич (`CATEGORIES.length` БИШ). Discord-ийн засварын select нь НЭРЭЭР кодлодог тул энэ урхинд өртөхгүй. `test/categoryButtonIndex.test.js` + хоёр bot-ийн `category-filter.test.js` үүнийг түгжсэн |
+| ⚠️ **018: хуучин "хууль бус" мөрүүд** | Applicability нэмэгдэхээс ӨМНӨ үүссэн зөрчилтэй мөр (ж: `income` + `Тээвэр`) **ХЭВЭЭР үлдэнэ — миграц хийгээгүй** (зориуд). `catLabel/catEmoji/catHex` нь applicability үл харах тул жагсаалтад хэвийн харагдана. Ганц ялгаа: засварын panel-д тухайн утга сонголтын жагсаалтад байхгүй тул **идэвхтэй товч харагдахгүй** — хэрэглэгч зөвшөөрөгдсөн утга сонгож л засна |
+| Хасалтын хязгаар хаана хэрэгжсэн бэ | `excluded_amount ≥ 0` — **баганын CHECK**. `excluded_amount ≤ amount` — SQLite-д cross-column CHECK бичих боломжгүй тул **API давхарга (`setTransactionExcludedAmount`) + 2 trigger** (INSERT/UPDATE, `1e-6` хүлцэлтэй). Float нийлбэрийн бөөрөнхийлөлт "бүрэн хасагдсан"-ыг эвдэхээс сэргийлж `EXCLUSION_EPS = 1e-6` хэрэглэдэг |
 
 ---
 
-## 15. Одоогийн төлөв (2026-08-04)
+## 15. Одоогийн төлөв (2026-08-05)
 
 - Серверт 4 pm2 процесс online, домейн амьд.
 - Calendar/Telegram холбогдоогүй. Telegram bot ажиллаж байна.
 - AI ангилал **унтраалттай** (`AI_CATEGORIZATION_ENABLED=false`) — credit байхгүй. Асаахад
   танигдаагүй мерчантад санал өгнө; унтраалттай үед зүгээр pending_review болно.
-- **Сүүлийн ажил — Өрийн дэвтэр + төсвөөс хасах туг (commit `6951061`, серверт ГАРСАН):**
+- **★ Сүүлийн ажил — АНГИЛЛЫН ХАМААРАЛ / applicability (018, ⚠️ DEPLOY ХИЙГЭЭГҮЙ,
+  зөвшөөрөл хүлээж байна). МИГРАЦ БАЙХГҮЙ — schema хөндөөгүй, зөвхөн одоо байгаа
+  `type` баганыг УНШИНА:** Зарлаган гүйлгээн дээр ангилал сонгохдоо "Орлого" гарч,
+  хадгаламж татах зэрэг мөрийг утгагүй ангилах боломжтой байсныг хаав.
+  `config/categories.js`-д `CATEGORY_APPLICABILITY` + `isCategoryAllowedFor()` (★ ганц
+  предикат, **fail-open**) + `categoriesFor()` + `listCategoriesWithIndexFor()` нэмэгдэв
+  (§8.1). Зургаан цэг шүүдэг болов: Dashboard `RowPanel` ба `ConfirmModal`
+  (мөрийн `type` аль хэдийн scope-д — plumbing хэрэггүй), Discord товчны эгнээ ба
+  засварын select, Telegram keyboard (builder бүр НЭГ параметр авав), сервер тал
+  `PATCH /:id/category` → 400. `POST /overrides`-д **хэсэгчилсэн** шалгалт (type
+  тодорхойлох боломжгүй — §5). `api/ai.js`-ийн prompt-оос орлогын ангилал хасагдав
+  (AI салаа зөвхөн зарлагад хүрдэг тул "Орлого" санал ҮРГЭЛЖ буруу байсан).
+  ⚠️ Bot-ын **индексийн урхи** (§14) — шүүсэн ч ЖИНХЭНЭ индекс кодлогдоно, тестээр түгжсэн.
+  Шинэ тест **36** (дундын 13, API 11, Discord 6, Telegram 6) — нийт **300** ногоон.
+  Хуучин "хууль бус" мөрүүдэд **миграц хийгээгүй** (зориуд) — харагдац эвдрээгүйг
+  бодит апп дээр шалгасан. Deploy: dashboard `dist` + API + хоёр bot.
+  ⚠️ Энэ нь **Phase 1** — override-ийн type-predicate (`classify.js`-ийн lookup нь
+  type үл харна) нь ТУСДАА ажил, schema өөрчлөлт шаардана.
+- **Өмнөх ажил — МЭДЭГДЭЛ ИРСЭН ЦАГ (миграц 017, ⚠️ DEPLOY ХИЙГЭЭГҮЙ, зөвшөөрөл
+  хүлээж байна):** Голомтын имэйлийн BODY-д зөвхөн ОГНОО байдгийг тогтоож, гүйлгээний
+  цагийг Gmail имэйлийн `Date:` header-ээс авдаг болов. `transactions.email_received_at`
+  (TEXT NULL, ISO 8601 **UTC**, backfill байхгүй) · дундын `config/txfields.js`-д
+  `isoInstant()` (Date → ISO UTC эсвэл null) + `ubTimeLabel()` (ISO → УБ `HH:mm`) ·
+  listener-ийн push payload бүтээлт `src/payload.js` болж салсан (тестлэгдэх боломжтой) ·
+  `emailReceivedAt` нь `api/schema.js`-д сонголттой `z.string().datetime()` ·
+  Discord embed-ийн «Огноо» = `2026-08-05 · 14:32` · dashboard-д огнооны нүдэн дээр
+  tooltip (`Банкны мэдэгдэл ирсэн: 14:32`) + expand панелд `🕒` мөр.
+  ⚠️ `txn_date` ХӨНДӨГДӨӨГҮЙ; цаггүй мөрд юу ч харуулахгүй (хуурамч "00:00" байхгүй).
+  Шинэ тест 14 (listener 5, API 6, Discord 3) — тухайн үед нийт **264** ногоон.
+  ⚠️ API + listener-ийг **ХАМТ** deploy хийнэ (§10). Талбар нь сонголттой тул аль нэг нь
+  түрүүлсэн ч 400 гарахгүй (зөвхөн цаг нь түр бүртгэгдэхгүй) — гэхдээ хамт гаргах нь зөв.
+- **Өмнөх ажил — ХЭСЭГЧИЛСЭН ХАСАЛТ / хуваасан зардал (миграц 016, ⚠️ DEPLOY ХИЙГЭЭГҮЙ,
+  хэрэглэгчийн зөвшөөрөл хүлээж байна):** хасалт нь туг биш **ДҮН** болсон
+  (`transactions.excluded_amount` + `debt_ledger.exclusion_share`), 4 analytics query нь
+  мөр шүүхийн оронд **цэвэр дүн нийлбэрлэдэг**, нэг гүйлгээнд олон бичлэг холбогдож
+  тус бүр хувь хэмжээгээ нэмдэг. Шийдэгдсэн кэйс: 90,000₮ хоолны данснаас Болдын 30к,
+  Ганагийн 25к нь гарч, **өөрийн 35к «Гадуур хооллолт»-д ҮЛДЭНЭ**. Үлдэгдэл/balance-history
+  **байт бүрээрээ хэвээр** (тест `deepEqual`-ээр түгжсэн). UI: DebtLedger-ийн «хүний хэсэг»
+  талбар (үлдэгдлээр хязгаарлагдсан) + гүйлгээний мөрийн `↩ … буцаагдсан` / `цэвэр …` тэмдэглэгээ.
+  Шинэ тест `api/test/partial-exclusion.test.js` (12) + `debt.test.js`-д 3 (тухайн үед нийт 250).
+  Хуучин 2 тест **зориудаар** шинэчлэгдсэн (015-д хуваасан зардал бүхлээрээ хасагддаг байсан
+  нь энэ ажлын засаж буй ЯГ ТЭР алдаа) — дэлгэрэнгүйг §12/§14-өөс.
+- **Өмнөх ажил — Өрийн дэвтэр + төсвөөс хасах туг (commit `6951061`, серверт ГАРСАН):**
   миграц 015 (`debt_ledger` + `transactions.excluded_from_budget`), `routes/debtLedger.js`,
   `PATCH /transactions/:id/exclusion`, `dashboard/src/lib/debt.js` (цэвэр netting),
   `DebtLedger.jsx` (Шинжилгээ табын дотор). Нөхөн төлбөрийн кэйс шийдэгдсэн: найзын
@@ -580,6 +719,9 @@ settle+орлого холбох→орлогын хасалт, re-open→буц
   `category_overrides` = **39** (үүнээс 1 нь smoke-ийн `ZZSMOKE0804BOM`) ·
   `debt_ledger` = **0** · `excluded_from_budget=1` мөр = **0** (бүх 1,115 мөр = 0).
   Одоогийн үлдэгдэл 90,154.58₮.
+  → **016-ын backfill-ийн нөлөө:** `excluded_from_budget=1` мөр 0 тул production-д
+  бүх 1,115 мөр `excluded_amount = 0` болно (өөрчлөлт үнэндээ 0 мөрөнд). `debt_ledger`
+  хоосон тул дахин тооцоолол ч хөндөх зүйлгүй — миграц маш аюулгүй.
 - ⚠️ Owner-ийн Gmail `reauth_needed` төлөвтэй — сүүлийн ЖИНХЭНЭ банкны гүйлгээ 2026-08-02,
   шинэ и-мэйл татагдахгүй байна (dashboard → Тохиргоо → Gmail дахин холбох).
 - Өмнөх ажлууд: EUR-г эх валютаар хадгалах, амьд FX ханш, үлдэгдлийн график + муж

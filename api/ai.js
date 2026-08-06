@@ -12,13 +12,18 @@
 // ============================================================
 
 import { listCategories } from './categorize.js';
+import { isCategoryAllowedFor } from '../config/categories.js';
 
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
 
 export function createAi({ apiKey, model, enabled: toggle = true } = {}) {
   // AI идэвхтэй = toggle асаалттай БА key байгаа. Аль нэг нь дутвал унтраалттай.
   const enabled = !!toggle && !!apiKey;
-  const categories = listCategories();
+  // ⚠️ AI санал ЗӨВХӨН зарлагын мөрөнд асуугдана: classify.js-д орлого нь
+  // өмнөх салаанд (type==='income' → 'Орлого') шийдэгддэг тул AI хүртэл
+  // хүрэхгүй. Тиймээс зөвхөн орлогын ангиллыг санал болгох нь ҮРГЭЛЖ буруу —
+  // prompt-оос хасна (PendingReview боломжгүй саналыг ★-аар онцлохгүй болно).
+  const categories = listCategories().filter((c) => isCategoryAllowedFor(c, 'expense'));
 
   // Давтагдах systemийг cache_control-оор кэшилнэ (prompt caching).
   const systemBlocks = [

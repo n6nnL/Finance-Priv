@@ -17,9 +17,10 @@ import { DatabaseSync } from 'node:sqlite';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { config } from './config.js';
 import {
-  CATEGORIES, categoryByIndex, encodeModalId, encodeCatSelectId, encodeFieldModalId,
+  categoryByIndex, encodeModalId, encodeCatSelectId, encodeFieldModalId,
   encodeApplyAllId, parseId,
 } from './categories.js';
+import { categoriesFor } from '../config/categories.js';
 import { sendNotification, buildEmbed, buildComponentsFor } from './notify.js';
 import { patchCategory, updateFields, getTransaction } from './apiClient.js';
 import { APPLY_TO_ALL_CONFIRM, detailFieldFor } from '../config/transactionActions.js';
@@ -128,13 +129,19 @@ function applyAllButtons(txnId) {
   );
 }
 
-/** Засварын ангилал select — одоогийн ангиллыг default болгож харуулна. */
-function buildCategorySelect(txnId, originMessageId, currentCategory) {
+/**
+ * Засварын ангилал select — одоогийн ангиллыг default болгож харуулна.
+ * Гүйлгээний ТӨРӨЛД тохирох ангиллыг л санал болгоно (зарлагад "Орлого" гарахгүй).
+ * ⚠️ Энэ select нь ангиллыг НЭРЭЭР (setValue) дамжуулдаг тул шүүхэд индексийн
+ * урхи БАЙХГҮЙ (товчны эгнээнээс ялгаатай — notify.js-ийн тайлбарыг үз).
+ * @param {'income'|'expense'|null} [type]
+ */
+function buildCategorySelect(txnId, originMessageId, currentCategory, type) {
   const menu = new StringSelectMenuBuilder()
     .setCustomId(encodeCatSelectId(txnId, originMessageId))
     .setPlaceholder('Шинэ ангилал сонгох…')
     .addOptions(
-      CATEGORIES.map((c) =>
+      categoriesFor(type).map((c) =>
         new StringSelectMenuOptionBuilder().setLabel(c).setValue(c).setDefault(c === currentCategory)
       )
     );
@@ -162,7 +169,7 @@ client.on('interactionCreate', async (interaction) => {
           await interaction.reply({ content: '⚠️ Энэ гүйлгээ олдсонгүй (устсан байж магадгүй).', ephemeral: true });
           return;
         }
-        const row = buildCategorySelect(p.txnId, interaction.message.id, current.category);
+        const row = buildCategorySelect(p.txnId, interaction.message.id, current.category, current.type);
         await interaction.reply({
           content: `Одоогийн ангилал: **${current.category || '(ангилаагүй)'}**\nШинэ ангилал сонгоно уу:`,
           components: [row],

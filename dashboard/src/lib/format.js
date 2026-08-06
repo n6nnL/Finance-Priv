@@ -1,6 +1,7 @@
 // Ангиллын нэр/metadata (emoji/hex) + хуучин нэрийн mapping нь config/categories.js-д
 // (★ single source). Энд зөвхөн frontend-ийн Tailwind badge өнгө + туслах функц.
 import { OLD_TO_NEW, CATEGORY_META } from '../../../config/categories.js';
+import { ubTimeLabel } from '../../../config/txfields.js';
 
 export const CATEGORY_COLORS = {
   'Гадуур хооллолт': 'bg-green-100 text-green-800',
@@ -53,6 +54,18 @@ export function dateLabel(d) {
   const m = String(d).match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (!m) return d;
   return `${Number(m[2])}-р сарын ${Number(m[3])}`;
+}
+
+// Банкны мэдэгдэл ирсэн цаг (email_received_at, ISO UTC) → УБ цагаар 'HH:mm'.
+// Утга байхгүй бол null — дуудагч тал ЮУ Ч харуулахгүй (хуурамч "00:00" гаргахгүй).
+export function txnTimeLabel(row) {
+  return ubTimeLabel(row?.email_received_at);
+}
+
+// Огнооны нүдэн дэх tooltip. Цаггүй мөрд null → title attribute огт нэмэгдэхгүй.
+export function txnTimeTitle(row) {
+  const t = txnTimeLabel(row);
+  return t ? `Банкны мэдэгдэл ирсэн: ${t}` : undefined;
 }
 
 // ── Дүнг нуух (privacy) горим ──────────────────────────────────────────────

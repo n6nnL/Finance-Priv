@@ -1,9 +1,11 @@
 import { useState } from 'react';
-import { money, catLabel, catEmoji, catHex, hexTint, displayDesc } from '../lib/format.js';
+import { money, catLabel, catEmoji, catHex, hexTint, displayDesc, txnTimeLabel, txnTimeTitle } from '../lib/format.js';
+import { exclusionMarker } from '../lib/debt.js';
 import { api } from '../lib/api.js';
 import {
   ACTION_SET_CATEGORY, APPLY_TO_ALL_CONFIRM, detailFieldFor, findAction,
 } from '../../../config/transactionActions.js';
+import { isCategoryAllowedFor } from '../../../config/categories.js';
 
 // Гүйлгээний жагсаалт. Мөр дээр дарахад expand панель нээгдэж ангилал өөрчлөх,
 // талбар (POS→Газрын нэр / бусад→Шалтгаан) засах, applyToAll (default OFF,
@@ -46,6 +48,10 @@ export default function TransactionTable({ data, total, limit, offset, loading, 
           const hex = catHex(t.category);
           const isIncome = t.type === 'income';
           const expanded = expandedId === t.id;
+          // Хасалтын тэмдэглэгээ: ангиллын нийлбэр яагаад мөрийн дүнгээс бага
+          // байгааг тайлбарлана. ⚠️ Мөрөнд ҮРГЭЛЖ БҮТЭН дүн харагдана (үлдэгдэлд
+          // бүтнээрээ тоологдсон) — цэвэр дүнг доор нь жижгээр нэмнэ.
+          const excl = exclusionMarker(t);
           return (
             <div key={t.id} className={i < rows.length - 1 ? 'border-b border-[#F2EADC]' : ''}>
               <div
@@ -74,6 +80,17 @@ export default function TransactionTable({ data, total, limit, offset, loading, 
                       </span>
                       {t.account_last4 && <span className="text-[13px] text-[#A39A8A] whitespace-nowrap">••{t.account_last4}</span>}
                       {t.is_pos === 1 && <span className="text-[13px] text-[#3FA9A0] whitespace-nowrap">POS</span>}
+                      {excl && (
+                        <span
+                          className="text-[13px] font-medium px-[8px] py-[2px] rounded-full whitespace-nowrap"
+                          style={{ color: '#3FA9A0', background: 'rgba(63,169,160,.12)' }}
+                          title={excl.full
+                            ? 'Энэ гүйлгээ бүхэлдээ төсөв/ангиллын тооцооноос хасагдсан (үлдэгдэлд хэвээр).'
+                            : 'Гүйлгээний зарим хэсэг бусдын хувь тул төсөв/ангиллаас хасагдсан (үлдэгдэлд бүтнээрээ хэвээр).'}
+                        >
+                          {excl.full ? '↩ Төсвөөс хасагдсан' : `↩ ${money(excl.excluded)} буцаагдсан`}
+                        </span>
+                      )}
                     </div>
                     {t.note && (
                       <div className="mt-[2px] text-[13px] text-[#8C8578] truncate">📝 {t.note}</div>
@@ -85,7 +102,18 @@ export default function TransactionTable({ data, total, limit, offset, loading, 
                     <div className="font-display font-semibold text-[15.5px] whitespace-nowrap" style={{ color: isIncome ? '#2E9E5B' : '#D8483B' }}>
                       {isIncome ? '+' : '−'}{money(t.amount)}
                     </div>
-                    <div className="text-[13px] text-[#A39A8A] mt-[2px] whitespace-nowrap">{t.txn_date || '-'}</div>
+                    {excl && !excl.full && (
+                      <div className="text-[13px] text-[#6E665A] mt-[2px] whitespace-nowrap">цэвэр {money(excl.net)}</div>
+                    )}
+                    {/* Огноо — үндсэн харагдац ХЭВЭЭР. Банкны мэдэгдэл ирсэн цаг нь
+                        нэмэлт давхарга: hover дээр tooltip (мөрийг товшвол доорх
+                        панелд бас харагдана). Цаггүй мөрд title огт нэмэгдэхгүй. */}
+                    <div
+                      className="text-[13px] text-[#A39A8A] mt-[2px] whitespace-nowrap"
+                      title={txnTimeTitle(t)}
+                    >
+                      {t.txn_date || '-'}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -131,6 +159,9 @@ export default function TransactionTable({ data, total, limit, offset, loading, 
 function RowPanel({ row, categories, applyPatch, onClose }) {
   const catAction = findAction(row, ACTION_SET_CATEGORY);
   const detail = detailFieldFor(row);
+  // Зөвхөн энэ ТӨРЛИЙН гүйлгээнд утгатай ангилал (зарлагад "Орлого" гарахгүй).
+  // Шийдвэрийг config/categories.js гаргана — энд дүрэм давхардуулахгүй.
+  const catOptions = categories.filter((c) => isCategoryAllowedFor(c, row.type));
   const [cat, setCat] = useState(row.category ?? null);
   const [text, setText] = useState(detail.current || '');
   const [applyAll, setApplyAll] = useState(false); // ⚠️ default OFF — санамсаргүй override үүсэхгүй
@@ -174,10 +205,18 @@ function RowPanel({ row, categories, applyPatch, onClose }) {
 
   return (
     <div className="border-t border-[#F0E6D4] bg-[#FBF6EC] py-[16px] px-[18px]">
+      {/* Мэдэгдэл ирсэн цаг (touch дээр tooltip харагдахгүй тул энд ч харуулна).
+          email_received_at NULL бол энэ мөр огт гарахгүй — цаггүй хэвээр. */}
+      {txnTimeLabel(row) && (
+        <div className="text-[13px] text-[#A39A8A] mb-[12px]">
+          🕒 Банкны мэдэгдэл ирсэн: {row.txn_date} · {txnTimeLabel(row)}
+        </div>
+      )}
+
       {/* Ангилал сонгох/өөрчлөх */}
       <div className="text-[13px] font-medium text-[#6E665A] mb-[8px]">{catAction.label}</div>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-[8px] mb-[16px]">
-        {categories.map((c) => {
+        {catOptions.map((c) => {
           const sel = cat === c;
           const hx = catHex(c);
           return (

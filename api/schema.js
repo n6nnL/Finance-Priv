@@ -58,6 +58,10 @@ export const TransactionSchema = z.object({
     .finite()
     .optional()
     .nullable(), // Үлдэгдэл (гүйлгээний дараах данс дахь дүн); parse амжилтгүй/имэйлд байхгүй бол null
+  // Банкны мэдэгдэл ирсэн цаг = имэйлийн `Date:` header, ISO 8601 **UTC** (017).
+  // Имэйлийн BODY-д зөвхөн огноо байдаг тул цагийн цорын ганц эх сурвалж.
+  // Байхгүй бол null — хуучин listener хувилбарын payload татгалзагдахгүй.
+  emailReceivedAt: z.string().datetime().optional().nullable(),
   // Multi-tenant listener: аль хэрэглэгчийн inbox-оос ирсэн гүйлгээ вэ.
   // Machine (API key) push-д ЗААВАЛ (route талд шалгана); JWT push-д үл тоомсорлоно.
   userId: z.number().int().positive().optional().nullable(),

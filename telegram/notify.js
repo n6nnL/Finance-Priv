@@ -3,8 +3,9 @@
 // ============================================================
 
 import { Markup } from 'telegraf';
-import { CATEGORIES, encodeButtonId, encodeEditButtonId, encodeFieldButtonId } from './categories.js';
+import { encodeButtonId, encodeEditButtonId, encodeFieldButtonId } from './categories.js';
 import { isPendingTxn, detailFieldFor } from '../config/transactionActions.js';
+import { listCategoriesWithIndexFor } from '../config/categories.js';
 
 export function fmtMoney(n) {
   if (n == null) return '-';
@@ -39,16 +40,30 @@ export function buildText(tx) {
 }
 
 /**
- * 10 ангиллын товчлуурууд (2 эгнээ × 5).
+ * Гүйлгээний ТӨРӨЛД тохирох ангиллын товчлуурууд (эгнээнд 5).
  * kind='c' → pending баталгаажуулалт; kind='ec' → classified мөрийн засвар
  * (stale-check-гүй урсгал — bot.js-ийн handler ялгаж боловсруулна).
+ *
+ * ⚠️ ИНДЕКСИЙН УРХИ (discord/notify.js-тэй ижил): callback_data дотор ангиллыг
+ * БҮТЭН CATEGORIES массив дахь индексээр дамжуулж, categoryByIndex()-ээр
+ * задална. Шүүсэн массивын ШИНЭ индексийг кодловол товч бүр БУРУУ ангилал
+ * илгээнэ. Тиймээс listCategoriesWithIndexFor()-ийн `index`-ийг кодолж,
+ * `pos`-ийг зөвхөн эгнээ таслахад ашиглана.
+ *
+ * @param {number} txnId
+ * @param {boolean} isPos
+ * @param {'c'|'ec'} [kind]
+ * @param {'income'|'expense'|null} [type] гүйлгээний төрөл (шүүлтэд)
  */
-export function buildCategoryKeyboard(txnId, isPos, kind = 'c') {
+export function buildCategoryKeyboard(txnId, isPos, kind = 'c', type) {
+  const opts = listCategoriesWithIndexFor(type);
   const rows = [];
-  for (let r = 0; r < Math.ceil(CATEGORIES.length / 5); r++) {
+  for (let r = 0; r < Math.ceil(opts.length / 5); r++) {
     const row = [];
-    for (let i = r * 5; i < Math.min((r + 1) * 5, CATEGORIES.length); i++) {
-      row.push(Markup.button.callback(CATEGORIES[i], encodeButtonId(txnId, i, isPos, kind)));
+    for (let pos = r * 5; pos < Math.min((r + 1) * 5, opts.length); pos++) {
+      const { category, index } = opts[pos];
+      // ★ index — pos БИШ (доторх дараалал шүүлтээс хамаарахгүй)
+      row.push(Markup.button.callback(category, encodeButtonId(txnId, index, isPos, kind)));
     }
     rows.push(row);
   }
@@ -76,7 +91,7 @@ export function buildEditKeyboard(tx) {
  */
 export function keyboardFor(tx) {
   if (isPendingTxn(tx)) {
-    const kb = buildCategoryKeyboard(tx.id, tx.is_pos === 1);
+    const kb = buildCategoryKeyboard(tx.id, tx.is_pos === 1, 'c', tx.type);
     kb.reply_markup.inline_keyboard.push(fieldButtonRow(tx));
     return kb;
   }

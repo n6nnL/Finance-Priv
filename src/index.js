@@ -14,6 +14,8 @@ import { ImapListener } from './imap-client.js';
 import { createAccountsStore } from './accounts.js';
 import { createManager } from './manager.js';
 import { parseGolomt } from './parsers/golomt.js';
+import { isoInstant } from '../config/txfields.js';
+import { buildPushPayload } from './payload.js';
 import { categorize } from './categorize.js';
 import { pushTransaction } from './push.js';
 import { trackBalanceParse } from './balanceAlert.js';
@@ -41,6 +43,10 @@ function senderMatches(parsed) {
 async function processEmail(account, parsed, uid) {
   const messageId = parsed.messageId ?? null;
   const subject = parsed.subject ?? '';
+  // Мэдэгдэл ирсэн цаг: имэйлийн `Date:` header (simpleParser → parsed.date).
+  // Голомтын BODY-д зөвхөн ОГНОО (цаггүй) байдаг тул цагийн цорын ганц эх сурвалж.
+  // Байхгүй/буруу бол null — одоогийн цагаар ХЭЗЭЭ Ч нөхөхгүй (хуурамч болно).
+  const emailReceivedAt = isoInstant(parsed.date);
 
   // 1) Банкны хаягаар шүүх
   if (!senderMatches(parsed)) {
@@ -94,20 +100,16 @@ async function processEmail(account, parsed, uid) {
   // 7) API payload бэлдэх — вэбсайтын API-ийн каноник гэрээтэй ИЖИЛ:
   //    messageId, amount, currency, date, description, type, category,
   //    accountLast4, raw + userId (multi-tenant: API талд ЗААВАЛ, owner fallback үгүй).
-  const payload = {
+  //    + emailReceivedAt (мэдэгдэл ирсэн цаг). Бүтээлт нь src/payload.js-д (цэвэр,
+  //    тестлэгдэх) — талбарын жагсаалт api/schema.js-ийн гэрээтэй нэг мөр байна.
+  const payload = buildPushPayload({
     messageId: idKey,
     userId: account.userId,
-    amount: tx.amount,
-    currency: tx.currency,
-    date: tx.date,
-    description: tx.description,
-    type: tx.type, // parser шууд 'expense'|'income' буцаана
+    tx,
     category,
-    accountLast4: tx.accountLast4,
-    isPos: tx.isPos, // BOM дүрэм (POS гүйлгээ эсэх)
-    balance: tx.balance, // Үлдэгдэл (гүйлгээний дараах данс дахь дүн); parse амжилтгүй бол null
-    raw: (tx.raw || subject || '').slice(0, 4000),
-  };
+    emailReceivedAt,
+    subject,
+  });
 
   // 8) DB-д урьдчилж insert (status: pushing-ийн оронд эхэлж push_failed-аар
   //    тэмдэглэж, амжилттай бол шинэчилнэ — ингэснээр push дунд унтарсан ч

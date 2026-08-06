@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { money, catLabel, catEmoji, catHex, hexTint, displayDesc } from '../lib/format.js';
 import { api } from '../lib/api.js';
 import { APPLY_TO_ALL_CONFIRM, detailFieldFor } from '../../../config/transactionActions.js';
+import { isCategoryAllowedFor } from '../../../config/categories.js';
 
 // Inline pending banner — shows at top of txn page
 export default function PendingReview({ items, total, categories, onConfirmed }) {
@@ -31,7 +32,8 @@ export default function PendingReview({ items, total, categories, onConfirmed })
           {items.map(t => (
             <div key={t.id} className="flex items-start sm:items-center gap-[13px] bg-cream-card border border-[#F1E4CC] rounded-[13px] py-[12px] px-[14px]">
               <div className="w-[38px] h-[38px] shrink-0 rounded-[11px] bg-[#F3ECDD] flex items-center justify-center text-[18px]">
-                {t.ai_suggested_category ? catEmoji(t.ai_suggested_category) : '🔔'}
+                {isCategoryAllowedFor(t.ai_suggested_category, t.type) && t.ai_suggested_category
+                  ? catEmoji(t.ai_suggested_category) : '🔔'}
               </div>
               <div className="min-w-0 flex-1 flex flex-col gap-[8px] sm:flex-row sm:items-center sm:gap-[13px]">
                 <div className="min-w-0 flex-1">
@@ -70,7 +72,11 @@ export default function PendingReview({ items, total, categories, onConfirmed })
 function ConfirmModal({ t, categories, onClose, onSaved }) {
   // POS→Газрын нэр / бусад→Шалтгаан — ялгааг дундын модуль шийднэ (bot-уудтай ижил)
   const detail = detailFieldFor(t);
-  const suggest = t.ai_suggested_category;
+  // Зөвхөн энэ ТӨРЛИЙН гүйлгээнд утгатай ангилал (config/categories.js шийднэ).
+  const catOptions = categories.filter((c) => isCategoryAllowedFor(c, t.type));
+  // AI санал ч мөн адил шүүгдэнэ — боломжгүй ангиллыг ★-аар онцолж, хэрэглэгчийг
+  // буруу сонголт руу түлхэхгүй (жишээ: зарлагад "Орлого" санал болгох).
+  const suggest = isCategoryAllowedFor(t.ai_suggested_category, t.type) ? t.ai_suggested_category : null;
   const [cat, setCat] = useState(null);
   const [note, setNote] = useState(detail.current || '');
   const [applyAll, setApplyAll] = useState(false); // ⚠️ default OFF — тодорхой сонгосон үед л override
@@ -143,7 +149,7 @@ function ConfirmModal({ t, categories, onClose, onSaved }) {
           {/* Category chips */}
           <label className="block text-[13px] font-medium text-[#6E665A] mb-[10px]">Ангилал сонгох</label>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-[8px] mb-[24px]">
-            {categories.map(c => {
+            {catOptions.map(c => {
               const sel = cat === c;
               const isSug = !cat && c === suggest;
               const hex = catHex(c);

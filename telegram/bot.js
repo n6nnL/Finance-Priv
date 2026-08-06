@@ -214,7 +214,7 @@ bot.on('callback_query', async (ctx) => {
       if (!current) { await ctx.reply('⚠️ Энэ гүйлгээ олдсонгүй.'); return; }
       await ctx.reply(`Одоогийн ангилал: *${current.category || '(ангилаагүй)'}*\nШинэ ангилал сонгоно уу:`, {
         parse_mode: 'Markdown',
-        ...buildCategoryKeyboard(p.txnId, current.is_pos === 1, 'ec'),
+        ...buildCategoryKeyboard(p.txnId, current.is_pos === 1, 'ec', current.type),
       });
       return;
     }

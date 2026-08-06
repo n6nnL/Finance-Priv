@@ -16,10 +16,16 @@
 //    PATCH  /:id         — засах / хаах (settle) / дахин нээх
 //    DELETE /:id         — устгах (+ энэ бичлэгээс үүдсэн хасалтыг буцаана)
 //
-//  Гүйлгээ холбох нь ТУХАЙН гүйлгээг `excluded_from_budget=1` болгоно —
-//  найзын билетийн зардал ТӨСӨВ/ангиллаас гарна, харин ҮЛДЭГДЭЛД хэвээр
-//  тоологдоно (мөнгө бодитоор дансаас гарсан). Холбоос тасрахад хасалт
-//  буцаагдана — гэхдээ ӨӨР бичлэг тэр гүйлгээг лавлаагүй тохиолдолд Л.
+//  Гүйлгээ холбох нь тухайн гүйлгээнээс ЭНЭ БИЧЛЭГИЙН ХУВЬ ХЭМЖЭЭГ (016:
+//  exclusionShare ?? amount) төсвөөс хасна — найзын билетийн зардал ТӨСӨВ/
+//  ангиллаас гарна, харин ҮЛДЭГДЭЛД хэвээр тоологдоно (мөнгө бодитоор дансаас
+//  гарсан). Нэг гүйлгээнд ОЛОН бичлэг холбогдож болно (хуваасан зоогийн газрын
+//  данс): гүйлгээний excluded_amount = холбогдсон бүх бичлэгийн хувь хэмжээний
+//  НИЙЛБЭР. Холбоос тасрахад ЗӨВХӨН тэр бичлэгийн хувь хэмжээ хасагдаж, дүн
+//  дахин тооцоологдоно (нөгөө хүмүүсийн хувь хэвээр).
+//
+//  ⚠️ Валют: өрийн бичлэг ба гүйлгээний валют ЗААВАЛ таарна (30 EUR-ыг MNT
+//  гүйлгээнээс хасах боломжгүй) — таарахгүй бол 400. Хөрвүүлэлт backend-д БАЙХГҮЙ.
 // ============================================================
 
 import { Router } from 'express';
@@ -27,6 +33,10 @@ import { z } from 'zod';
 import { logger } from '../logger.js';
 
 const YMD = /^\d{4}-\d{2}-\d{2}$/;
+
+// Хувь хэмжээ: 0-ээс багагүй, сонголттой (null = "бичлэгийн бүтэн amount").
+const EXCL_SHARE = z.number({ invalid_type_error: 'exclusionShare нь тоо байх ёстой' })
+  .finite().nonnegative('exclusionShare сөрөг байж болохгүй').nullable().optional();
 
 const CreateSchema = z.object({
   counterparty: z.string().trim().min(1, 'counterparty шаардлагатай').max(100),
@@ -40,6 +50,9 @@ const CreateSchema = z.object({
   entryDate: z.string().regex(YMD, 'entryDate нь YYYY-MM-DD байх ёстой'),
   note: z.string().max(500).nullable().optional(),
   linkedTransactionId: z.number().int().positive().nullable().optional(),
+  // Холбосон гүйлгээнээс ХЭДИЙГ эзлэх вэ. null/өгөөгүй → бичлэгийн amount
+  // (түгээмэл: өр нь буцаагдах хэсэгтэй тэнцүү). 0 → холбоно ч хасахгүй.
+  exclusionShare: EXCL_SHARE,
 });
 
 // PATCH — бүх талбар сонголттой (өгсөнийг Л шинэчилнэ)
@@ -53,10 +66,23 @@ const PatchSchema = z.object({
   status: z.enum(['open', 'settled']).optional(),
   linkedTransactionId: z.number().int().positive().nullable().optional(),
   settledTransactionId: z.number().int().positive().nullable().optional(),
+  exclusionShare: EXCL_SHARE,
 }).strict();
 
 function zodErrors(error) {
   return error.issues.map((i) => ({ field: i.path.join('.') || '(root)', message: i.message }));
+}
+
+/**
+ * Хасалтын дүрмийн зөрчил (валют таарахгүй / дүн хэтэрсэн) → 400.
+ * db давхарга нь ExclusionError-оор шидэж, SQLite транзакц бүхэлдээ rollback
+ * болсон байна — тал дутуу төлөв ҮЛДЭХГҮЙ.
+ * @returns {boolean} боловсруулсан эсэх
+ */
+function handleExclusionError(err, res) {
+  if (err?.name !== 'ExclusionError') return false;
+  res.status(400).json({ status: 'error', error: err.message, code: err.code });
+  return true;
 }
 
 export function createDebtLedgerRouter({ db }) {
@@ -102,6 +128,7 @@ export function createDebtLedgerRouter({ db }) {
       const entry = db.addDebtEntry(req.userId, parsed.data);
       return res.status(201).json({ status: 'ok', entry, balances: db.getDebtBalances(req.userId) });
     } catch (err) {
+      if (handleExclusionError(err, res)) return undefined;
       logger.error('POST /debt-ledger алдаа', { err: err?.message });
       return res.status(500).json({ status: 'error', error: 'Internal Server Error' });
     }
@@ -130,6 +157,7 @@ export function createDebtLedgerRouter({ db }) {
       if (!entry) return res.status(404).json({ status: 'error', error: 'Мөр олдсонгүй' });
       return res.status(200).json({ status: 'ok', entry, balances: db.getDebtBalances(req.userId) });
     } catch (err) {
+      if (handleExclusionError(err, res)) return undefined;
       logger.error('PATCH /debt-ledger алдаа', { err: err?.message });
       return res.status(500).json({ status: 'error', error: 'Internal Server Error' });
     }

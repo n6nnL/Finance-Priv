@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../lib/api.js';
 import { money, eurFmt } from '../lib/format.js';
-import { groupByCounterparty, totalsByCurrency, eurToMntDisplay, balancePhrase } from '../lib/debt.js';
+import {
+  groupByCounterparty, totalsByCurrency, eurToMntDisplay, balancePhrase,
+  effectiveShare, remainingExcludable,
+} from '../lib/debt.js';
 
 // Өр төлбөрийн дэвтэр (Шинжилгээ табын дотор). Хоёр харагдац:
 //   (a) хүн бүрийн ЦЭВЭР үлдэгдэл — "Болд танд 20,000₮ өртэй"
@@ -9,6 +12,8 @@ import { groupByCounterparty, totalsByCurrency, eurToMntDisplay, balancePhrase }
 // ⚠️ Бүх арифметик lib/debt.js-д (React-гүй, тестлэгдсэн). Энд зөвхөн рендер.
 // ⚠️ EUR-ийг эх валютаар нь харуулж, MNT-ийн ойролцоо утгыг ЗӨВХӨН ханш
 //    байгаа үед "≈" тэмдэгтэйгээр нэмнэ (ханшгүй бол огт харуулахгүй).
+// ⚠️ ХУВААСАН зардал (016): гүйлгээ холбоход "энэ хүний хэсэг хэд вэ?" гэдгийг
+//    заана — гүйлгээ БҮХЭЛДЭЭ төсвөөс гарахгүй, зөвхөн тэр хэсэг нь гарна.
 
 const cardCls = 'bg-cream-card border border-cream-border rounded-card p-[22px]';
 const inputCls = 'w-full h-[44px] px-[13px] border-[1.5px] border-cream-input rounded-[12px] bg-white font-body text-[14px] text-[#2A2722] outline-none';
@@ -205,6 +210,8 @@ function HistoryRow({ entry, eurMnt, onSettle, onReopen, onDelete }) {
   const lent = entry.direction === 'i_lent';
   const settled = entry.status === 'settled';
   const approx = entry.currency === 'EUR' ? eurToMntDisplay(entry.amount, eurMnt) : null;
+  // Холбосон гүйлгээнээс эзэлж буй хэсэг (тодорхойлоогүй бол бичлэгийн бүтэн дүн)
+  const share = effectiveShare(entry);
 
   const run = async (fn) => { setBusy(true); try { await fn(entry); } finally { setBusy(false); } };
 
@@ -226,7 +233,11 @@ function HistoryRow({ entry, eurMnt, onSettle, onReopen, onDelete }) {
         <div className="flex flex-wrap items-center gap-[8px] mt-[2px]">
           <span className="text-[13px] text-[#A39A8A] whitespace-nowrap">{entry.entryDate}</span>
           {settled && <span className="text-[13px] text-[#2E9E5B] whitespace-nowrap">хаагдсан</span>}
-          {entry.linkedTransactionId && <span className="text-[13px] text-[#3FA9A0] whitespace-nowrap">🔗 #{entry.linkedTransactionId}</span>}
+          {entry.linkedTransactionId && (
+            <span className="text-[13px] text-[#3FA9A0] whitespace-nowrap">
+              🔗 #{entry.linkedTransactionId} · {amountText(share, entry.currency)} хасав
+            </span>
+          )}
           {entry.settledTransactionId && <span className="text-[13px] text-[#3FA9A0] whitespace-nowrap">✓#{entry.settledTransactionId}</span>}
         </div>
         {entry.note && <div className="text-[13px] text-[#8C8578] mt-[2px] truncate">📝 {entry.note}</div>}
@@ -267,6 +278,7 @@ function AddForm({ onDone, onError }) {
   const [entryDate, setEntryDate] = useState(todayYmd());
   const [note, setNote] = useState('');
   const [linkId, setLinkId] = useState('');
+  const [share, setShare] = useState(''); // хоосон = "бичлэгийн бүтэн дүн"
   const [txns, setTxns] = useState([]);
   const [busy, setBusy] = useState(false);
 
@@ -279,10 +291,28 @@ function AddForm({ onDone, onError }) {
     return () => { alive = false; };
   }, []);
 
+  // --- Хуваасан зардлын тооцоо (бүгд lib/debt.js-ийн цэвэр функцээр) ---
+  const linkedTxn = useMemo(
+    () => txns.find((t) => String(t.id) === String(linkId)) || null,
+    [txns, linkId]
+  );
+  const txnCurrency = linkedTxn ? (linkedTxn.currency || 'MNT') : null;
+  // ⚠️ Валют таарахгүй бол хасалт УТГАГҮЙ (backend хөрвүүлэхгүй) — server 400
+  // өгөхөөс өмнө энд тайлбарлана.
+  const currencyMismatch = !!linkedTxn && txnCurrency !== currency;
+  const remaining = linkedTxn ? remainingExcludable(linkedTxn) : 0;
+  const shareValue = share.trim() === '' ? Number(amount) || 0 : Number(share);
+  const shareInvalid = share.trim() !== '' && (!Number.isFinite(shareValue) || shareValue < 0);
+  const shareTooBig = !!linkedTxn && !currencyMismatch && shareValue > remaining + 1e-6;
+  const blocked = currencyMismatch || shareInvalid || shareTooBig;
+
   async function submit() {
     const amt = Number(amount);
     if (!counterparty.trim()) { onError('Хэний нэрийг бичнэ үү'); return; }
     if (!Number.isFinite(amt) || amt <= 0) { onError('Дүн эерэг тоо байх ёстой'); return; }
+    if (currencyMismatch) { onError(`Гүйлгээний валют (${txnCurrency}) бичлэгийнхтэй таарахгүй байна`); return; }
+    if (shareInvalid) { onError('Эзлэх хэсэг 0-ээс багагүй тоо байх ёстой'); return; }
+    if (shareTooBig) { onError(`Эзлэх хэсэг үлдсэн ${amountText(remaining, txnCurrency)}-аас их байж болохгүй`); return; }
     setBusy(true);
     try {
       await api.addDebt({
@@ -293,6 +323,7 @@ function AddForm({ onDone, onError }) {
         entryDate,
         note: note.trim() || null,
         linkedTransactionId: linkId ? Number(linkId) : null,
+        exclusionShare: share.trim() === '' ? null : Number(share),
       });
       onError('');
       onDone();
@@ -344,14 +375,45 @@ function AddForm({ onDone, onError }) {
             <option value="">— холбохгүй —</option>
             {txns.map((t) => (
               <option key={t.id} value={t.id}>
-                {t.txn_date} · {t.type === 'income' ? '+' : '−'}{money(t.amount)} · {(t.merchant_place || t.description || '').slice(0, 40)}
+                {t.txn_date} · {t.type === 'income' ? '+' : '−'}{amountText(t.amount, t.currency)} · {(t.merchant_place || t.description || '').slice(0, 40)}
               </option>
             ))}
           </select>
           <div className="text-[13px] text-[#A39A8A] mt-[5px]">
-            Холбосон гүйлгээ төсөв/ангиллын тооцооноос хасагдана. Үлдэгдэлд хэвээр тоологдоно.
+            Холбосон гүйлгээнээс доорх хэсэг нь төсөв/ангиллын тооцооноос хасагдана.
+            Үлдэгдэлд БҮТЭН дүнгээрээ тоологдсон хэвээр.
           </div>
         </div>
+
+        {/* ХУВААСАН ЗАРДАЛ — зөвхөн гүйлгээ сонгосон үед утгатай */}
+        {linkedTxn && (
+          <div className="sm:col-span-2">
+            <label className={labelCls}>Энэ гүйлгээнээс тухайн хүний хэсэг</label>
+            <input
+              value={share}
+              onChange={(e) => setShare(e.target.value)}
+              inputMode="decimal"
+              placeholder={String(Number(amount) || 0)}
+              className={inputCls}
+            />
+            <div className="text-[13px] mt-[5px]" style={{ color: currencyMismatch || shareTooBig || shareInvalid ? '#D8483B' : '#A39A8A' }}>
+              {currencyMismatch
+                ? `Гүйлгээ ${txnCurrency}, бичлэг ${currency} — валют таарахгүй тул холбох боломжгүй.`
+                : shareInvalid
+                  ? 'Эзлэх хэсэг 0-ээс багагүй тоо байх ёстой.'
+                  : shareTooBig
+                    ? `Үлдсэн ${amountText(remaining, txnCurrency)}-аас их байж болохгүй.`
+                    : `Хоосон бол бичлэгийн дүнг эзэлнэ. Хасах боломжтой үлдэгдэл: ${amountText(remaining, txnCurrency)} / ${amountText(linkedTxn.amount, txnCurrency)}.`}
+            </div>
+            {!currencyMismatch && !shareInvalid && !shareTooBig && (
+              <div className="text-[13px] text-[#6E665A] mt-[3px]">
+                Ангилалд үлдэх таны зарлага: <span className="font-semibold whitespace-nowrap">
+                  {amountText(Math.max(0, Number(linkedTxn.amount) - (Number(linkedTxn.excluded_amount) || 0) - shareValue), txnCurrency)}
+                </span>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="flex flex-col gap-[10px] sm:flex-row mt-[14px]">
@@ -359,9 +421,13 @@ function AddForm({ onDone, onError }) {
           className="h-[44px] px-[18px] border-[1.5px] border-cream-input bg-white rounded-[12px] font-body font-semibold text-[14px] text-[#6E665A] cursor-pointer">
           Болих
         </button>
-        <button onClick={submit} disabled={busy}
+        <button onClick={submit} disabled={busy || blocked}
           className="flex-1 h-[44px] border-none rounded-[12px] font-body font-semibold text-[14.5px]"
-          style={{ background: busy ? '#E7DECF' : '#1F7A6B', color: busy ? '#B7AD9C' : '#fff', cursor: busy ? 'not-allowed' : 'pointer' }}>
+          style={{
+            background: busy || blocked ? '#E7DECF' : '#1F7A6B',
+            color: busy || blocked ? '#B7AD9C' : '#fff',
+            cursor: busy || blocked ? 'not-allowed' : 'pointer',
+          }}>
           {busy ? 'Хадгалж байна...' : 'Хадгалах'}
         </button>
       </div>

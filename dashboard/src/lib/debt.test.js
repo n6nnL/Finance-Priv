@@ -7,7 +7,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   signedAmount, netBalances, groupByCounterparty, totalsByCurrency,
-  eurToMntDisplay, balancePhrase,
+  eurToMntDisplay, balancePhrase, effectiveShare, remainingExcludable, exclusionMarker,
 } from './debt.js';
 
 const e = (over = {}) => ({
@@ -101,4 +101,39 @@ test('balancePhrase: чиглэлээс хамаарсан монгол өгүү
   assert.equal(iOwe.subject, 'Та ээж-д');
   assert.equal(iOwe.isOwedToMe, false);
   assert.equal(iOwe.abs, 100000);
+});
+
+// ===================== ХЭСЭГЧИЛСЭН ХАСАЛТ (split) =====================
+
+test('effectiveShare: exclusionShare байхгүй бол бичлэгийн бүтэн дүн', () => {
+  assert.equal(effectiveShare(e({ amount: 30000 })), 30000);
+  assert.equal(effectiveShare(e({ amount: 30000, exclusionShare: null })), 30000);
+  assert.equal(effectiveShare(e({ amount: 30000, exclusionShare: 40000 })), 40000);
+  assert.equal(effectiveShare(e({ amount: 30000, exclusionShare: 0 })), 0, '0 = холбоно ч хасахгүй');
+  assert.equal(effectiveShare(null), 0);
+});
+
+test('remainingExcludable: бүтэн дүнгээс аль хэдийн хасагдсаныг хасна', () => {
+  assert.equal(remainingExcludable({ amount: 90000, excluded_amount: 0 }), 90000);
+  assert.equal(remainingExcludable({ amount: 90000, excluded_amount: 30000 }), 60000);
+  assert.equal(remainingExcludable({ amount: 90000, excluded_amount: 90000 }), 0);
+  // ⚠️ ХЭЗЭЭ Ч сөрөг болохгүй (хэрэв өгөгдөл гажсан ч)
+  assert.equal(remainingExcludable({ amount: 90000, excluded_amount: 120000 }), 0);
+  assert.equal(remainingExcludable(null), 0);
+});
+
+test('exclusionMarker: хасалтгүй → null, хэсэгчилсэн → цэвэр дүн, бүрэн → full', () => {
+  assert.equal(exclusionMarker({ amount: 90000, excluded_amount: 0 }), null);
+  assert.equal(exclusionMarker({ amount: 90000 }), null);
+
+  const partial = exclusionMarker({ amount: 90000, excluded_amount: 55000 });
+  assert.equal(partial.full, false);
+  assert.equal(partial.excluded, 55000);
+  assert.equal(partial.net, 35000, 'ангилалд үлдэх ӨӨРИЙН зарлага');
+
+  const full = exclusionMarker({ amount: 600000, excluded_amount: 600000 });
+  assert.equal(full.full, true);
+  assert.equal(full.net, 0);
+  // float бөөрөнхийлөлт "бүрэн"-ийг эвдэхгүй
+  assert.equal(exclusionMarker({ amount: 0.3, excluded_amount: 0.1 + 0.2 }).full, true);
 });

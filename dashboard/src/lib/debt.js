@@ -111,4 +111,46 @@ export function balancePhrase(balance) {
   };
 }
 
-export default { signedAmount, netBalances, groupByCounterparty, totalsByCurrency, eurToMntDisplay, balancePhrase };
+// ===================== ХЭСЭГЧИЛСЭН ХАСАЛТ (split) =====================
+//  ⚠️ Гүйлгээ ХЭЗЭЭ Ч бүхлээрээ алга болохгүй: 90,000₮-ийн зоогийн газрын
+//  дансны 55,000₮ нь найзуудынх бол ӨӨРИЙН 35,000₮ ангилалдаа үлдэх ЁСТОЙ.
+//  Backend `amount - excluded_amount`-ыг нийлбэрлэдэг; энд зөвхөн ХАРУУЛАХ тооцоо.
+//  ⚠️ Үлдэгдэл (balance) энэ тооцоонд ОГТ хамаарахгүй — тэнд ҮРГЭЛЖ бүтэн дүн.
+
+const SPLIT_EPS = 1e-6;
+
+/** Өрийн бичлэг холбогдсон гүйлгээнээсээ хэдийг эзлэх вэ (NULL → бичлэгийн дүн). */
+export function effectiveShare(entry) {
+  const raw = entry?.exclusionShare;
+  const n = raw == null ? Number(entry?.amount) : Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+/** Тухайн гүйлгээнээс ХЭДИЙГ нэмж хасах боломжтой вэ (шинэ хувь хэмжээний дээд хязгаар). */
+export function remainingExcludable(txn) {
+  const amount = Number(txn?.amount);
+  if (!Number.isFinite(amount) || amount <= 0) return 0;
+  const excluded = Number(txn?.excluded_amount) || 0;
+  return Math.max(0, amount - excluded);
+}
+
+/**
+ * Гүйлгээний мөрөнд харуулах хасалтын тэмдэглэгээ. Хасалтгүй бол null
+ * (тэмдэглэгээ огт харуулахгүй — цэвэр жагсаалт).
+ * @returns {{full:boolean, excluded:number, net:number}|null}
+ */
+export function exclusionMarker(txn) {
+  const amount = Number(txn?.amount);
+  const excluded = Number(txn?.excluded_amount) || 0;
+  if (!Number.isFinite(amount) || excluded <= 0) return null;
+  return {
+    full: excluded + SPLIT_EPS >= amount, // бүхэлдээ бусдынх
+    excluded,
+    net: Math.max(0, amount - excluded),
+  };
+}
+
+export default {
+  signedAmount, netBalances, groupByCounterparty, totalsByCurrency, eurToMntDisplay, balancePhrase,
+  effectiveShare, remainingExcludable, exclusionMarker,
+};

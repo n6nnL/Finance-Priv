@@ -76,6 +76,27 @@ export const DEFAULT_ALLOC_PERCENTS = [
   { category: 'Тээвэр', percent: 5 },
 ];
 
+/**
+ * Float дүнгийн харьцуулалтын хүлцэл. 30000+25000+35000 гэх мэт нийлбэр нь
+ * IEEE-754-д яг таг тэнцэхгүй байж болох тул "бүрэн хасагдсан" болон
+ * "хэтэрсэн"-ийг ЭНЭ хүлцэлтэйгээр шийднэ (₮/€-ийн хувьд 1e-6 нь утгагүй жижиг).
+ */
+export const EXCLUSION_EPS = 1e-6;
+
+/**
+ * Хасалтын дүрэм зөрчигдсөн (дуудагч тал 400 болгож хөрвүүлнэ).
+ *  code = 'OVER_EXCLUSION'   — хасах дүн гүйлгээний дүнгээс их
+ *  code = 'CURRENCY_MISMATCH'— өрийн бичлэг ба гүйлгээний валют таарахгүй
+ *  code = 'INVALID_AMOUNT'   — тоо биш / сөрөг
+ */
+export class ExclusionError extends Error {
+  constructor(code, message) {
+    super(message);
+    this.name = 'ExclusionError';
+    this.code = code;
+  }
+}
+
 export function createDb(dbPath, opts = {}) {
   if (dbPath && dbPath !== ':memory:') mkdirSync(dirname(dbPath), { recursive: true });
 
@@ -346,6 +367,57 @@ export function createDb(dbPath, opts = {}) {
     if (!hasColumn('transactions', 'excluded_from_budget')) {
       db.exec('ALTER TABLE transactions ADD COLUMN excluded_from_budget INTEGER NOT NULL DEFAULT 0');
     }
+
+    // 016: ХЭСЭГЧИЛСЭН ХАСАЛТ — хуваасан зардал (split) ---------------------------
+    //  015-ын хасалт "бүгд эсвэл юу ч биш" байсан: 90,000₮-ийн зоогийн газрын
+    //  дансыг холбоход БҮХЭЛД нь төсвөөс гардаг. Хуваасан зардалд энэ БУРУУ —
+    //  Болдын 30к, Ганагийн 25к нь гарах ёстой ч ӨӨРИЙН 35к "Гадуур хооллолт"-д
+    //  ҮЛДЭХ ёстой. Тиймээс тугийг ДҮН болгож нарийвчлав.
+    //
+    //  (a) transactions.excluded_amount — төсвөөс хасагдах ДҮН (0 = хасалтгүй).
+    //      Төсөв/ангилал/шинжилгээ нь `amount - excluded_amount`-ыг нийлбэрлэнэ.
+    //      ⚠️ ҮЛДЭГДЭЛД ХЭЗЭЭ Ч НӨЛӨӨЛӨХГҮЙ (015-ын заагтай ЯГ ижил) —
+    //      getCurrentBalance/getBalanceAnchor/getDailyTxnStats/balanceHistory.js
+    //      бүхэлд нь БҮТЭН amount-ыг хэвээр хэрэглэнэ.
+    //      Backfill: хуучин бүрэн хасагдсан мөр (excluded_from_budget=1) →
+    //      excluded_amount = amount ⇒ зан төлөв ЯГ хэвээр үлдэнэ.
+    //  (b) excluded_from_budget нь УСТГАГДААГҮЙ — "БҮРЭН хасагдсан" гэсэн
+    //      уламжлагдсан туг болж (excluded_amount >= amount) бичилт бүр дээр
+    //      хамт шинэчлэгдэнэ. Хуучин уншигч код бүр зөв хэвээр ажиллана.
+    //  (c) debt_ledger.exclusion_share — тухайн бичлэг холбогдсон гүйлгээнээс
+    //      ХЭДИЙГ эзлэхийг заана. NULL → бичлэгийн өөрийн amount (түгээмэл тохиолдол).
+    //      Нэг гүйлгээнд ОЛОН бичлэг холбогдож болно: excluded_amount = тэдгээрийн
+    //      хувь хэмжээний НИЙЛБЭР (тоолуур нэмэгдүүлэхгүй, ҮРГЭЛЖ дахин тооцоолно).
+    if (!hasColumn('transactions', 'excluded_amount')) {
+      db.exec('ALTER TABLE transactions ADD COLUMN excluded_amount REAL NOT NULL DEFAULT 0 CHECK (excluded_amount >= 0)');
+      db.exec('UPDATE transactions SET excluded_amount = amount WHERE excluded_from_budget = 1');
+    }
+    if (!hasColumn('debt_ledger', 'exclusion_share')) {
+      db.exec('ALTER TABLE debt_ledger ADD COLUMN exclusion_share REAL CHECK (exclusion_share IS NULL OR exclusion_share >= 0)');
+    }
+    // Багана хоорондын хязгаар (excluded_amount <= amount) — SQLite-д энгийн CHECK
+    // болгож бичих боломжгүй тул trigger. Float дүнгийн бөөрөнхийлөлтөд EPS зөвшөөрнө
+    // (55000.000000001 гэх мэт нийлбэр нь хууль ёсны "бүрэн" хасалт байж болно).
+    db.exec(`CREATE TRIGGER IF NOT EXISTS trg_txn_excluded_amount_ins
+      BEFORE INSERT ON transactions
+      WHEN NEW.excluded_amount > NEW.amount + ${EXCLUSION_EPS}
+      BEGIN SELECT RAISE(ABORT, 'excluded_amount нь amount-аас их байж болохгүй'); END`);
+    db.exec(`CREATE TRIGGER IF NOT EXISTS trg_txn_excluded_amount_upd
+      BEFORE UPDATE ON transactions
+      WHEN NEW.excluded_amount > NEW.amount + ${EXCLUSION_EPS}
+      BEGIN SELECT RAISE(ABORT, 'excluded_amount нь amount-аас их байж болохгүй'); END`);
+
+    // 017: МЭДЭГДЭЛ ИРСЭН ЦАГ (email Date: header) --------------------------------
+    // Голомтын имэйлийн BODY-д ЗӨВХӨН огноо (цаггүй) байдаг тул гүйлгээний цагийг
+    // Gmail имэйлийн `Date:` header-ээс авна. ISO 8601 **UTC** string-ээр хадгална
+    // (ж: '2026-08-05T06:32:00.000Z'); дэлгэц/bot дээр л УБ (UTC+8) болгож харуулна.
+    //  ⚠️ txn_date-д ХЭЗЭЭ Ч хүрэхгүй — тэр огноо (YYYY-MM-DD) хэвээрээ үлдэнэ
+    //     (budgetCycle.js / balanceHistory.js / /balance-history бүгд түүнд тулгуурладаг).
+    //  Nullable, DEFAULT NULL, backfill ХИЙХГҮЙ — 012-ын account_balance-тай ЯГ ижил
+    //  философи: хуучин ~1057 мөр цаггүй үлдэнэ, parse амжилтгүй бол insert блоклогдохгүй.
+    if (!hasColumn('transactions', 'email_received_at')) {
+      db.exec('ALTER TABLE transactions ADD COLUMN email_received_at TEXT');
+    }
   }
   migrate();
 
@@ -374,10 +446,12 @@ export function createDb(dbPath, opts = {}) {
   const insertStmt = db.prepare(`
     INSERT OR IGNORE INTO transactions
       (user_id, message_id, amount, currency, txn_date, description, type, category,
-       account_last4, raw, status, ai_suggested_category, ai_confidence, is_pos, account_balance)
+       account_last4, raw, status, ai_suggested_category, ai_confidence, is_pos, account_balance,
+       email_received_at)
     VALUES
       (@user_id, @message_id, @amount, @currency, @txn_date, @description, @type, @category,
-       @account_last4, @raw, @status, @ai_suggested_category, @ai_confidence, @is_pos, @account_balance)`);
+       @account_last4, @raw, @status, @ai_suggested_category, @ai_confidence, @is_pos, @account_balance,
+       @email_received_at)`);
   const byIdStmt = db.prepare('SELECT * FROM transactions WHERE id = ? AND user_id = ?');
   const byMsgStmt = db.prepare('SELECT * FROM transactions WHERE message_id = ? AND user_id = ?');
 
@@ -399,6 +473,8 @@ export function createDb(dbPath, opts = {}) {
       ai_confidence: tx.aiConfidence ?? null,
       is_pos: tx.isPos == null ? null : tx.isPos ? 1 : 0,
       account_balance: tx.balance ?? null,
+      // Мэдэгдэл ирсэн цаг (017) — listener илгээгээгүй бол NULL (цаггүй мөр).
+      email_received_at: tx.emailReceivedAt ?? null,
     };
     const res = insertStmt.run(row);
     if (res.changes > 0) {
@@ -485,11 +561,25 @@ export function createDb(dbPath, opts = {}) {
   }
 
   /**
+   * Төсөв/шинжилгээнд тоологдох ЦЭВЭР дүнгийн SQL хэсэг (migration 016).
+   * Дөрвөн дуудагч (getSummary/getMonthly/getByCategory/getCycleSpend) БҮГД
+   * үүнийг хэрэглэнэ — өөр хаана Ч БИШ. `amount` дангаараа = үлдэгдлийн ертөнц.
+   * ⚠️ excluded_amount ∈ [0, amount] тул NET хэзээ ч сөрөг болохгүй.
+   */
+  const NET_AMOUNT = '(amount - COALESCE(excluded_amount, 0))';
+
+  /**
    * Шүүлтийн WHERE — ҮРГЭЛЖ user_id-аар эхэлнэ (tenant isolation).
-   * @param {{budgetOnly?: boolean}} filters  budgetOnly=true үед төсвөөс хасагдсан
-   *   мөрийг (excluded_from_budget=1) хасна — ЗӨВХӨН шинжилгээ/төсвийн дуудагчид.
+   * @param {{budgetOnly?: boolean}} filters  budgetOnly=true үед БҮРЭН хасагдсан
+   *   мөрийг (excluded_from_budget=1 ⇔ excluded_amount >= amount) хасна — ЗӨВХӨН
+   *   шинжилгээ/төсвийн дуудагчид.
+   *   ⚠️ 016-аас хойш энэ шүүлт нь ЗӨВХӨН тоо/бүлэг үүсгэхэд нөлөөлнө: бүрэн
+   *   хасагдсан мөрийн ЦЭВЭР дүн аль хэдийн 0 тул нийлбэрт нөлөөгүй. Ийнхүү
+   *   хуучин (015) зан төлөв — count, хоосон бүлэг байхгүй — ЯГ ХЭВЭЭР үлдэнэ.
+   *   ХЭСЭГЧИЛСЭН хасалттай мөр (0 < excluded_amount < amount) шүүгдэхгүй, зөвхөн
+   *   дүн нь NET_AMOUNT-аар багасна.
    *   listTransactions нь үүнийг ДАМЖУУЛАХГҮЙ: хэрэглэгч хасагдсан мөрөө жагсаалтдаа
-   *   хараад буцааж асаах боломжтой байх ёстой.
+   *   БҮТЭН дүнгээр хараад удирдах боломжтой байх ёстой (net хийхгүй).
    */
   function buildWhere(userId, { from, to, category, type, q, minAmount, maxAmount, status, budgetOnly } = {}) {
     const where = ['user_id = ?'];
@@ -519,17 +609,18 @@ export function createDb(dbPath, opts = {}) {
     return { rows: attachOverrideInfo(userId, rows), total: Number(total), limit: lim, offset: off };
   }
 
-  // ⚠️ ШИНЖИЛГЭЭ — төсвөөс хасагдсан мөр ОРОХГҮЙ (budgetOnly). Үлдэгдлийн
-  // тооцоололд (getCurrentBalance/getDailyTxnStats) энэ шүүлт БАЙХГҮЙ.
+  // ⚠️ ШИНЖИЛГЭЭ — БҮРЭН хасагдсан мөр ОРОХГҮЙ (budgetOnly), хэсэгчилсэн хасалттай
+  // мөр ЦЭВЭР дүнгээрээ (NET_AMOUNT) орно. Үлдэгдлийн тооцоололд
+  // (getCurrentBalance/getDailyTxnStats/balanceHistory) эдгээрийн АЛЬ Ч БАЙХГҮЙ.
   function getSummary(userId, filters = {}) {
     const { whereSql, params } = buildWhere(userId, { ...filters, budgetOnly: true });
     const totals = db.prepare(`SELECT
-        COALESCE(SUM(CASE WHEN type='expense' THEN amount ELSE 0 END),0) AS total_expense,
-        COALESCE(SUM(CASE WHEN type='income'  THEN amount ELSE 0 END),0) AS total_income,
+        COALESCE(SUM(CASE WHEN type='expense' THEN ${NET_AMOUNT} ELSE 0 END),0) AS total_expense,
+        COALESCE(SUM(CASE WHEN type='income'  THEN ${NET_AMOUNT} ELSE 0 END),0) AS total_income,
         COUNT(*) AS count FROM transactions ${whereSql}`).get(...params);
-    const byCategory = db.prepare(`SELECT category, type, COUNT(*) AS count, COALESCE(SUM(amount),0) AS total
+    const byCategory = db.prepare(`SELECT category, type, COUNT(*) AS count, COALESCE(SUM(${NET_AMOUNT}),0) AS total
         FROM transactions ${whereSql} GROUP BY category, type ORDER BY total DESC`).all(...params);
-    const byPlace = db.prepare(`SELECT merchant_place AS place, COUNT(*) AS count, COALESCE(SUM(amount),0) AS total
+    const byPlace = db.prepare(`SELECT merchant_place AS place, COUNT(*) AS count, COALESCE(SUM(${NET_AMOUNT}),0) AS total
         FROM transactions ${whereSql} AND merchant_place IS NOT NULL AND type='expense'
         GROUP BY merchant_place ORDER BY total DESC LIMIT 10`).all(...params);
     return {
@@ -545,8 +636,8 @@ export function createDb(dbPath, opts = {}) {
   function getMonthly(userId, { months = 12 } = {}) {
     const rows = db.prepare(`
       SELECT substr(txn_date,1,7) AS ym,
-             COALESCE(SUM(CASE WHEN type='expense' THEN amount ELSE 0 END),0) AS expense,
-             COALESCE(SUM(CASE WHEN type='income'  THEN amount ELSE 0 END),0) AS income,
+             COALESCE(SUM(CASE WHEN type='expense' THEN ${NET_AMOUNT} ELSE 0 END),0) AS expense,
+             COALESCE(SUM(CASE WHEN type='income'  THEN ${NET_AMOUNT} ELSE 0 END),0) AS income,
              COUNT(*) AS count
       FROM transactions WHERE user_id = ? AND txn_date IS NOT NULL AND excluded_from_budget = 0
       GROUP BY ym ORDER BY ym DESC LIMIT ?`).all(userId, Math.min(Math.max(Number(months) || 12, 1), 60));
@@ -566,15 +657,15 @@ export function createDb(dbPath, opts = {}) {
     const byCategory = db.prepare(`
       SELECT CASE WHEN category IS NULL OR status='pending_review'
                   THEN 'Ангилаагүй' ELSE category END AS category,
-             COUNT(*) AS count, COALESCE(SUM(amount),0) AS total
+             COUNT(*) AS count, COALESCE(SUM(${NET_AMOUNT}),0) AS total
       FROM transactions
       WHERE user_id=? AND type='expense' AND txn_date IS NOT NULL
             AND substr(txn_date,1,7)=? AND excluded_from_budget = 0
       GROUP BY 1 ORDER BY total DESC`).all(userId, m)
       .map((r) => ({ category: r.category, total: Number(r.total), count: Number(r.count) }));
-    const exp = db.prepare(`SELECT COALESCE(SUM(amount),0) AS t FROM transactions
+    const exp = db.prepare(`SELECT COALESCE(SUM(${NET_AMOUNT}),0) AS t FROM transactions
       WHERE user_id=? AND type='expense' AND txn_date IS NOT NULL AND substr(txn_date,1,7)=? AND excluded_from_budget = 0`).get(userId, m).t;
-    const inc = db.prepare(`SELECT COALESCE(SUM(amount),0) AS t FROM transactions
+    const inc = db.prepare(`SELECT COALESCE(SUM(${NET_AMOUNT}),0) AS t FROM transactions
       WHERE user_id=? AND type='income' AND txn_date IS NOT NULL AND substr(txn_date,1,7)=? AND excluded_from_budget = 0`).get(userId, m).t;
     return { month: m, byCategory, totalExpense: Number(exp), totalIncome: Number(inc) };
   }
@@ -590,7 +681,7 @@ export function createDb(dbPath, opts = {}) {
   function getCycleSpend(userId, startYmd, endYmd) {
     const rows = db.prepare(`
       SELECT CASE WHEN category IS NULL OR status='pending_review' THEN NULL ELSE category END AS cat,
-             COALESCE(SUM(amount),0) AS total
+             COALESCE(SUM(${NET_AMOUNT}),0) AS total
       FROM transactions
       WHERE user_id=? AND type='expense' AND txn_date IS NOT NULL
             AND txn_date >= ? AND txn_date < ? AND excluded_from_budget = 0
@@ -603,7 +694,7 @@ export function createDb(dbPath, opts = {}) {
     }
     byCategory.sort((a, b) => b.spent - a.spent);
     const totalSpend = byCategory.reduce((s, r) => s + r.spent, 0) + unclassified;
-    const actualIncome = Number(db.prepare(`SELECT COALESCE(SUM(amount),0) t FROM transactions
+    const actualIncome = Number(db.prepare(`SELECT COALESCE(SUM(${NET_AMOUNT}),0) t FROM transactions
       WHERE user_id=? AND type='income' AND txn_date IS NOT NULL AND txn_date >= ? AND txn_date < ?
             AND excluded_from_budget = 0`)
       .get(userId, startYmd, endYmd).t);
@@ -1029,7 +1120,8 @@ export function createDb(dbPath, opts = {}) {
   //  бүх ийм үйлдэл НЭГ SQLite транзакцид ороосон (тал дутуу төлөв үүсэхээс сэргийлнэ).
 
   const _debtCols = `id, user_id, counterparty, direction, amount, currency, entry_date, note,
-                     status, linked_transaction_id, settled_transaction_id, created_at, settled_at`;
+                     status, linked_transaction_id, settled_transaction_id, exclusion_share,
+                     created_at, settled_at`;
 
   const _mapDebt = (r) => (r ? {
     id: Number(r.id),
@@ -1042,6 +1134,9 @@ export function createDb(dbPath, opts = {}) {
     status: r.status,
     linkedTransactionId: r.linked_transaction_id == null ? null : Number(r.linked_transaction_id),
     settledTransactionId: r.settled_transaction_id == null ? null : Number(r.settled_transaction_id),
+    // NULL = "бичлэгийн бүтэн amount-ыг эзэлнэ" (түгээмэл тохиолдол). Хэрэглэгч
+    // тодорхой хувь хэмжээ (ж: цайллагын үлдэгдэл жигд бус хуваагдсан) өгвөл тоо.
+    exclusionShare: r.exclusion_share == null ? null : Number(r.exclusion_share),
     createdAt: r.created_at,
     settledAt: r.settled_at ?? null,
   } : null);
@@ -1086,26 +1181,58 @@ export function createDb(dbPath, opts = {}) {
       }));
   }
 
-  // --- Гүйлгээний хасалтын туслахууд ---
+  // --- Гүйлгээний хасалтын туслахууд (016: туг БИШ, ДҮН) ---
 
-  const _setExcluded = db.prepare(`UPDATE transactions
-    SET excluded_from_budget=@excluded, manually_edited=CASE WHEN @excluded=1 THEN 1 ELSE manually_edited END
+  //  excluded_from_budget нь ЭНД, бичилт бүр дээр, "БҮРЭН хасагдсан"-аар дахин
+  //  тооцоологдоно (excluded_amount >= amount). Тугийг уншиж байгаа ХУУЧИН бүх
+  //  зам (buildWhere budgetOnly, getMonthly/getByCategory/getCycleSpend-ийн WHERE,
+  //  route-ийн хариу) ийнхүү зөв хэвээр үлдэнэ.
+  //  manually_edited: хасалт БАЙГАА үед 1 (pipeline дахин хөндөхгүй) — 0 болгож
+  //  буцаахад БУЦААХГҮЙ (хэрэглэгч гар хүрсэн баримт хэвээр).
+  const _setExcludedAmount = db.prepare(`UPDATE transactions
+    SET excluded_amount = @amount,
+        excluded_from_budget = CASE WHEN @amount > 0 AND @amount + ${EXCLUSION_EPS} >= amount THEN 1 ELSE 0 END,
+        manually_edited = CASE WHEN @amount > 0 THEN 1 ELSE manually_edited END
     WHERE id=@id AND user_id=@user_id`);
 
   /**
-   * Гүйлгээг төсвөөс хасах/буцаах. Хасахад manually_edited=1 болгоно (pipeline
-   * дахин parse/categorize хийхгүй). Буцаахад manually_edited-г БУЦААХГҮЙ —
-   * хэрэглэгч гар хүрсэн баримт хэвээр үлдэнэ.
+   * Гүйлгээнээс төсвөөс хасах ДҮНГ тавих (0 = хасалтгүй). Хязгаар [0, amount] —
+   * давбал ExclusionError('OVER_EXCLUSION'). Ангиллын нийлбэр ХЭЗЭЭ Ч сөрөг
+   * болохгүйн баталгаа нь энэ.
+   * @returns {number} өөрчлөгдсөн мөрийн тоо
+   */
+  function setTransactionExcludedAmount(userId, id, amount) {
+    const row = byIdStmt.get(id, userId);
+    if (!row) return 0;
+    const amt = Number(amount);
+    if (!Number.isFinite(amt) || amt < 0) {
+      throw new ExclusionError('INVALID_AMOUNT', 'Хасах дүн 0-ээс багагүй тоо байх ёстой');
+    }
+    const full = Number(row.amount);
+    if (amt > full + EXCLUSION_EPS) {
+      throw new ExclusionError('OVER_EXCLUSION',
+        `Хасах дүн (${amt}) гүйлгээний дүнгээс (${full}) их байж болохгүй`);
+    }
+    // Float бөөрөнхийлөлт trigger-т мөргөхөөс сэргийлж таслана (амьд DB-д
+    // excluded_amount ЯГ amount байх нь "бүрэн хасагдсан"-ы каноник хэлбэр).
+    return _setExcludedAmount.run({ id, user_id: userId, amount: Math.min(amt, full) }).changes;
+  }
+
+  /**
+   * Уламжлагдсан boolean API (015). Одоо ДҮН дээр буусан: true → бүтэн amount,
+   * false → 0. Хуучин дуудагчид (route, тест) ЯГ адилхан ажиллана.
    * @returns {number} өөрчлөгдсөн мөрийн тоо
    */
   function setTransactionExclusion(userId, id, excluded) {
-    return _setExcluded.run({ id, user_id: userId, excluded: excluded ? 1 : 0 }).changes;
+    const row = byIdStmt.get(id, userId);
+    if (!row) return 0;
+    return setTransactionExcludedAmount(userId, id, excluded ? Number(row.amount) : 0);
   }
 
   /**
    * Тухайн гүйлгээг ӨӨР өрийн бичлэг (excludeDebtId-аас бусад) хараахан
-   * лавлаж байгаа эсэх. Хасалтыг буцаахаас ӨМНӨ ЗААВАЛ шалгана — эс бөгөөс
-   * нэг бичлэг устгахад нөгөөгийн хасалт санамсаргүй сэргэнэ.
+   * лавлаж байгаа эсэх. Гар аргаар хасалт өөрчлөхөөс ӨМНӨ ЗААВАЛ шалгана —
+   * эс бөгөөс дэвтрийн тооцоо ба туг зөрнө.
    */
   function isTransactionReferencedByOtherDebt(userId, txnId, excludeDebtId = null) {
     if (txnId == null) return false;
@@ -1116,11 +1243,50 @@ export function createDb(dbPath, opts = {}) {
     return Number(row.c) > 0;
   }
 
-  /** Холбоос тасрах үед хасалтыг буцаана — ӨӨР бичлэг лавлаагүй тохиолдолд Л. */
-  function releaseExclusionIfUnreferenced(userId, txnId, excludeDebtId) {
+  // Тухайн гүйлгээг лавлаж буй БҮХ өрийн бичлэгийн хувь хэмжээний нийлбэр.
+  // ⚠️ Нэг бичлэг гүйлгээг linked/settled аль алинд нь лавласан ч НЭГ Л удаа
+  //    тоологдоно (бичлэг = нэг хувь хэмжээ).
+  // ⚠️ Валют таарахгүй бичлэг НИЙЛБЭРТ ОРОХГҮЙ — 30 EUR-ыг MNT гүйлгээнээс
+  //    хасах боломжгүй (route нь ийм холбоосыг 400-аар татгалздаг; энэ нь
+  //    хоёр дахь хамгаалалт).
+  const _debtShareSum = db.prepare(`
+    SELECT COALESCE(SUM(COALESCE(d.exclusion_share, d.amount)), 0) AS s
+    FROM debt_ledger d
+    JOIN transactions t ON t.id = @txn AND t.user_id = @user
+    WHERE d.user_id = @user
+      AND (d.linked_transaction_id = @txn OR d.settled_transaction_id = @txn)
+      AND d.currency = COALESCE(t.currency, 'MNT')`);
+
+  /**
+   * Гүйлгээний excluded_amount-ыг ХОЛБОГДСОН БИЧЛЭГҮҮДЭЭС дахин тооцоолно.
+   * ⚠️ Тоолуур нэмэгдүүлэх/хасах БИШ — үргэлж бүх лавлагааны нийлбэрээс
+   * шинээр гаргана (retry/давхар дуудалтад ч зөв). Тиймээс нэг бичлэг
+   * салахад НӨГӨӨ бичлэгүүдийн хувь хэмжээ ХЭВЭЭР үлдэнэ (0 болж унахгүй).
+   * ЗААВАЛ өрийн бичлэгийн бичилтийн ДАРАА дуудна.
+   */
+  function recomputeTransactionExclusion(userId, txnId) {
     if (txnId == null) return;
-    if (isTransactionReferencedByOtherDebt(userId, txnId, excludeDebtId)) return;
-    setTransactionExclusion(userId, txnId, false);
+    const row = byIdStmt.get(txnId, userId);
+    if (!row) return;
+    const sum = Number(_debtShareSum.get({ txn: txnId, user: userId }).s);
+    setTransactionExcludedAmount(userId, txnId, sum); // хэтэрвэл ExclusionError → rollback
+  }
+
+  /**
+   * Өрийн бичлэгийн валют холбогдох гүйлгээнийхтэй таарч байгаа эсэх.
+   * ⚠️ Backend ХЭЗЭЭ Ч хөрвүүлэхгүй (manual ledger/debt ledger-ийн үндсэн дүрэм) —
+   * тиймээс валют зөрөх холбоос нь утгагүй, шууд татгалзана.
+   */
+  function assertLinkCurrency(userId, txnId, currency) {
+    if (txnId == null) return;
+    const row = byIdStmt.get(txnId, userId);
+    if (!row) return; // байхгүй гүйлгээг дуудагч тал тусад нь 400 болгоно
+    const txCur = row.currency || 'MNT';
+    const debtCur = currency || 'MNT';
+    if (txCur !== debtCur) {
+      throw new ExclusionError('CURRENCY_MISMATCH',
+        `Гүйлгээний валют (${txCur}) өрийн бичлэгийнхтэй (${debtCur}) таарахгүй тул холбох боломжгүй`);
+    }
   }
 
   /** Гүйлгээ тухайн хэрэглэгчийнх мөн эсэх (холбохын өмнөх эрхийн шалгалт). */
@@ -1138,38 +1304,43 @@ export function createDb(dbPath, opts = {}) {
 
   const _insertDebt = db.prepare(`
     INSERT INTO debt_ledger (user_id, counterparty, direction, amount, currency, entry_date, note,
-                             status, linked_transaction_id, created_at)
+                             status, linked_transaction_id, exclusion_share, created_at)
     VALUES (@user_id, @counterparty, @direction, @amount, @currency, @entry_date, @note,
-            'open', @linked, datetime('now'))`);
+            'open', @linked, @share, datetime('now'))`);
 
   /**
-   * Шинэ өрийн бичлэг. linked_transaction_id өгвөл тэр гүйлгээг ТӨСВӨӨС ХАСНА
-   * (нэг транзакцид — тал дутуу төлөв үүсэхгүй).
+   * Шинэ өрийн бичлэг. linked_transaction_id өгвөл тэр гүйлгээнээс ЭНЭ бичлэгийн
+   * хувь хэмжээг (exclusionShare ?? amount) төсвөөс хасна — нэг транзакцид, тал
+   * дутуу төлөв үүсэхгүй. Хэтрэх/валют зөрөх бол throw → бүхэлдээ rollback.
    */
   function addDebtEntry(userId, e) {
     return inTransaction(() => {
+      const currency = e.currency || 'MNT';
+      if (e.linkedTransactionId != null) assertLinkCurrency(userId, e.linkedTransactionId, currency);
       const res = _insertDebt.run({
         user_id: userId,
         counterparty: String(e.counterparty).trim(),
         direction: e.direction,
         amount: e.amount,
-        currency: e.currency || 'MNT',
+        currency,
         entry_date: e.entryDate,
         note: e.note ?? null,
         linked: e.linkedTransactionId ?? null,
+        share: e.exclusionShare ?? null,
       });
-      if (e.linkedTransactionId != null) setTransactionExclusion(userId, e.linkedTransactionId, true);
+      if (e.linkedTransactionId != null) recomputeTransactionExclusion(userId, e.linkedTransactionId);
       return _mapDebt(_getDebt.get(Number(res.lastInsertRowid), userId));
     });
   }
 
   /**
    * Өрийн бичлэг засах / хаах (settle) / дахин нээх (re-open).
-   * Хасалтын дүрэм:
-   *  - linked_transaction_id өөрчлөгдвөл: хуучныг сулла (өөр бичлэг лавлаагүй бол), шинийг хас.
-   *  - settled_transaction_id мөн адил.
-   *  - status 'settled' → settled_at тэмдэглэнэ; 'open' руу буцаавал settled_transaction_id-г
-   *    цэвэрлэж, түүний хасалтыг сулална.
+   * Хасалтын дүрэм (016 — ДҮНГЭЭР):
+   *  - Холбоос ЭСВЭЛ amount/exclusion_share/currency өөрчлөгдвөл ХӨНДӨГДСӨН БҮХ
+   *    гүйлгээний excluded_amount-ыг лавлагаануудаас нь ДАХИН ТООЦООЛНО. Хуучин
+   *    холбоос дээр нөгөө бичлэгүүдийн хувь хэмжээ хэвээр үлдэнэ (0 болж унахгүй).
+   *  - status 'settled' → settled_at тэмдэглэнэ; 'open' руу буцаавал
+   *    settled_transaction_id-г цэвэрлэж, түүний хувь хэмжээг чөлөөлнө.
    * @returns {object|null} шинэчилсэн бичлэг, олдохгүй бол null
    */
   function updateDebtEntry(userId, id, patch) {
@@ -1187,6 +1358,7 @@ export function createDb(dbPath, opts = {}) {
         status: patch.status !== undefined ? patch.status : cur.status,
         linked: patch.linkedTransactionId !== undefined ? patch.linkedTransactionId : cur.linked_transaction_id,
         settledTxn: patch.settledTransactionId !== undefined ? patch.settledTransactionId : cur.settled_transaction_id,
+        share: patch.exclusionShare !== undefined ? patch.exclusionShare : cur.exclusion_share,
       };
       // 'open' руу буцаахад хаалтын гүйлгээний холбоос утгагүй болно
       if (next.status === 'open') next.settledTxn = null;
@@ -1194,32 +1366,40 @@ export function createDb(dbPath, opts = {}) {
       const oldLinked = cur.linked_transaction_id;
       const oldSettled = cur.settled_transaction_id;
 
+      if (next.linked != null) assertLinkCurrency(userId, next.linked, next.currency);
+      if (next.settledTxn != null) assertLinkCurrency(userId, next.settledTxn, next.currency);
+
       db.prepare(`UPDATE debt_ledger SET counterparty=@counterparty, direction=@direction, amount=@amount,
           currency=@currency, entry_date=@entry_date, note=@note, status=@status,
-          linked_transaction_id=@linked, settled_transaction_id=@settledTxn,
+          linked_transaction_id=@linked, settled_transaction_id=@settledTxn, exclusion_share=@share,
           settled_at=CASE WHEN @status='settled' THEN COALESCE(settled_at, datetime('now')) ELSE NULL END
         WHERE id=@id AND user_id=@user_id`)
         .run({ ...next, id, user_id: userId });
 
-      // Шинээр холбогдсоныг хас; тасарсныг (өөр бичлэг лавлаагүй бол) сулла
-      if (next.linked != null) setTransactionExclusion(userId, next.linked, true);
-      if (next.settledTxn != null) setTransactionExclusion(userId, next.settledTxn, true);
-      if (oldLinked != null && oldLinked !== next.linked) releaseExclusionIfUnreferenced(userId, oldLinked, id);
-      if (oldSettled != null && oldSettled !== next.settledTxn) releaseExclusionIfUnreferenced(userId, oldSettled, id);
+      // Хөндөгдсөн БҮХ гүйлгээг (хуучин + шинэ) дахин тооцоолно. amount/share
+      // өөрчлөгдсөн ч холбоос хэвээр бол хасалт зөв дагаж өөрчлөгдөнө.
+      for (const txnId of new Set([oldLinked, oldSettled, next.linked, next.settledTxn].filter((v) => v != null))) {
+        recomputeTransactionExclusion(userId, txnId);
+      }
 
       return _mapDebt(_getDebt.get(id, userId));
     });
   }
 
-  /** Устгах + энэ бичлэгээс үүдсэн хасалтуудыг буцаах (өөр бичлэг лавлаагүй бол). */
+  /**
+   * Устгах + хөндөгдсөн гүйлгээнүүдийг дахин тооцоолох. ЗӨВХӨН энэ бичлэгийн
+   * хувь хэмжээ хасагдана — нөгөө бичлэгүүдийнх хэвээр (устгасны ДАРАА
+   * дахин тооцоолдог тул автоматаар).
+   */
   function deleteDebtEntry(userId, id) {
     return inTransaction(() => {
       const cur = _getDebt.get(id, userId);
       if (!cur) return 0;
       const changes = db.prepare('DELETE FROM debt_ledger WHERE id=? AND user_id=?').run(id, userId).changes;
       if (changes) {
-        releaseExclusionIfUnreferenced(userId, cur.linked_transaction_id, id);
-        releaseExclusionIfUnreferenced(userId, cur.settled_transaction_id, id);
+        for (const txnId of new Set([cur.linked_transaction_id, cur.settled_transaction_id].filter((v) => v != null))) {
+          recomputeTransactionExclusion(userId, txnId);
+        }
       }
       return changes;
     });
@@ -1235,7 +1415,7 @@ export function createDb(dbPath, opts = {}) {
     getDailyTransactionRows,
     listTransactions, getSummary,
     getMonthly, getByCategory, getCycleSpend, getPending, updateCategoryById, updateCategoryByPattern, updateTransactionFields,
-    autoClassifyStalePending, setTransactionExclusion, transactionBelongsToUser,
+    autoClassifyStalePending, setTransactionExclusion, setTransactionExcludedAmount, transactionBelongsToUser,
     // өр төлбөрийн дэвтэр (debt_ledger)
     listDebtEntries, getDebtEntry, getDebtBalances, addDebtEntry, updateDebtEntry, deleteDebtEntry,
     isTransactionReferencedByOtherDebt,

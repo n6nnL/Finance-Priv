@@ -280,15 +280,21 @@ test('★ ХАМГААЛАЛТ: өөр бичлэг лавлаж байвал х
   const e2 = await j(await call('/api/debt-ledger', 'POST', {
     counterparty: 'Б', direction: 'i_lent', amount: 50000, entryDate: '2026-03-03', linkedTransactionId: shared,
   }, bearer(tk)));
+  // 50k + 50k = 100k = бүтэн дүн → БҮРЭН хасагдсан (015-ын тугтай ижил үр дүн)
+  assert.equal(db.getById(u, shared).excluded_amount, 100000);
   assert.equal(db.getById(u, shared).excluded_from_budget, 1);
 
-  // Нэгийг устгахад хасалт ХЭВЭЭР (нөгөө нь лавласаар)
+  // 016: нэгийг устгахад ЗӨВХӨН түүний 50k чөлөөлөгдөнө — нөгөөгийнх ҮЛДЭНЭ
+  // (015-д бүтэн 100k хасагдсан хэвээр үлддэг байсан нь ХУВААСАН зардалд буруу)
   await call(`/api/debt-ledger/${e1.entry.id}`, 'DELETE', null, bearer(tk));
-  assert.equal(db.getById(u, shared).excluded_from_budget, 1, 'нөгөө бичлэг лавлаж байхад хасалт үлдэх ёстой');
+  const afterOne = db.getById(u, shared);
+  assert.equal(afterOne.excluded_amount, 50000, 'нөгөө бичлэгийн хувь хэмжээ үлдэх ёстой (0 ч биш, 100k ч биш)');
+  assert.equal(afterOne.excluded_from_budget, 0, 'бүрэн хасагдаагүй болсон');
 
-  // Сүүлчийнхийг устгахад Л хасалт буцна
+  // Сүүлчийнхийг устгахад Л хасалт бүрэн буцна
   await call(`/api/debt-ledger/${e2.entry.id}`, 'DELETE', null, bearer(tk));
-  assert.equal(db.getById(u, shared).excluded_from_budget, 0, 'сүүлийн лавлагаа арилахад хасалт буцах ёстой');
+  assert.equal(db.getById(u, shared).excluded_amount, 0, 'сүүлийн лавлагаа арилахад хасалт буцах ёстой');
+  assert.equal(db.getById(u, shared).excluded_from_budget, 0);
 });
 
 test('Холбоос солих: хуучин гүйлгээ сулрч, шинэ нь хасагдана', async () => {
@@ -300,14 +306,19 @@ test('Холбоос солих: хуучин гүйлгээ сулрч, шин�
   const e = await j(await call('/api/debt-ledger', 'POST', {
     counterparty: 'В', direction: 'i_lent', amount: 100, entryDate: '2026-02-01', linkedTransactionId: t1,
   }, bearer(tk)));
-  assert.equal(db.getById(u, t1).excluded_from_budget, 1);
+  assert.equal(db.getById(u, t1).excluded_amount, 100);
+  assert.equal(db.getById(u, t1).excluded_from_budget, 1); // 100 = t1-ийн бүтэн дүн
 
   await call(`/api/debt-ledger/${e.entry.id}`, 'PATCH', { linkedTransactionId: t2 }, bearer(tk));
-  assert.equal(db.getById(u, t1).excluded_from_budget, 0, 'хуучин холбоос сулрах ёстой');
-  assert.equal(db.getById(u, t2).excluded_from_budget, 1, 'шинэ холбоос хасагдах ёстой');
+  assert.equal(db.getById(u, t1).excluded_amount, 0, 'хуучин холбоос сулрах ёстой');
+  assert.equal(db.getById(u, t1).excluded_from_budget, 0);
+  // 016: 100₮-ийн бичлэг 200₮-ийн гүйлгээнээс ЗӨВХӨН 100₮-г хасна (бүхлээр нь БИШ)
+  assert.equal(db.getById(u, t2).excluded_amount, 100, 'шинэ холбоосоос бичлэгийн хувь хэмжээ хасагдана');
+  assert.equal(db.getById(u, t2).excluded_from_budget, 0, 'хэсэгчилсэн тул БҮРЭН хасагдсан гэж тэмдэглэгдэхгүй');
 
   // Холбоосыг бүрэн салгах
   await call(`/api/debt-ledger/${e.entry.id}`, 'PATCH', { linkedTransactionId: null }, bearer(tk));
+  assert.equal(db.getById(u, t2).excluded_amount, 0);
   assert.equal(db.getById(u, t2).excluded_from_budget, 0);
 });
 

@@ -15,9 +15,11 @@
 // ============================================================
 
 import { Router } from 'express';
+import { EXCLUSION_EPS as EPS } from '../db.js';
 import { validateTransaction } from '../schema.js';
 import { classifyTransaction } from '../classify.js';
 import { listCategories, isPosDescription } from '../categorize.js';
+import { isCategoryAllowedFor, categoriesFor } from '../../config/categories.js';
 import { logger } from '../logger.js';
 
 /**
@@ -185,6 +187,18 @@ export function createTransactionsRouter({ db, ai }) {
       const row = db.getById(req.userId, id);
       if (!row) return res.status(404).json({ status: 'error', error: 'Гүйлгээ олдсонгүй' });
 
+      // ---- Ангилал ↔ гүйлгээний ТӨРЛИЙН нийцэл (server-side backstop) ----
+      // Гурван клиент picker-ээ шүүдэг ч ТҮҮНД найдахгүй: шууд PATCH хийж
+      // зарлаган мөрөнд "Орлого" оноох боломжийг ЭНД хаана (UI-д л байгаа
+      // хамгаалалт нь хамгаалалт БИШ). Дүрэм нь config/categories.js-д.
+      if (!isCategoryAllowedFor(category, row.type)) {
+        const allowed = categoriesFor(row.type);
+        return res.status(400).json({
+          status: 'error',
+          error: `"${category}" ангилал ${row.type === 'income' ? 'орлогын' : 'зарлагын'} гүйлгээнд тохирохгүй. Боломжит: ${allowed.join(', ')}`,
+        });
+      }
+
       // ⚠️ Override (сурах) нь ЗӨВХӨН хэрэглэгч applyToAll-ыг ТОДОРХОЙ сонгосон
       // үед. Газрын нэр/шалтгаан дангаараа сурахад ХҮРГЭХГҮЙ — тэдгээр нь
       // learn=false үед доорх updateCategoryById-ээр тухайн ГАНЦ мөрөнд хадгална.
@@ -236,39 +250,68 @@ export function createTransactionsRouter({ db, ai }) {
   });
 
   // ---- PATCH /api/transactions/:id/exclusion — төсвөөс хасах/буцаах ----
-  //  Body: { excluded: true|false }. Өрийн дэвтрээс ХАМААРАЛГҮЙ шуурхай унтраалга
-  //  ("энэ миний бодит зарлага биш" тохиолдол).
+  //  Body: { excluded: true|false }  — бүхэлд нь хасах/буцаах (015, хэвээр)
+  //     ЭСВЭЛ { excludedAmount: number } — ХЭСЭГЧИЛСЭН хасалт (016), [0, amount].
+  //  Өрийн дэвтрээс ХАМААРАЛГҮЙ шуурхай унтраалга ("энэ миний бодит зарлага биш").
   //  ⚠️ ЗӨВХӨН төсөв/ангилал/шинжилгээнд нөлөөлнө — ҮЛДЭГДЭЛД ХЭЗЭЭ Ч нөлөөлөхгүй
-  //  (мөнгө бодитоор хөдөлсөн). Хасахад manually_edited=1 (pipeline дахин хөндөхгүй).
+  //  (мөнгө бодитоор хөдөлсөн). Хасалт байхад manually_edited=1 (pipeline дахин
+  //  хөндөхгүй). Дүн amount-аас хэтэрвэл 400 — ангиллын нийлбэр сөрөг болохгүй.
   router.patch('/:id/exclusion', (req, res) => {
     try {
       const id = Number(req.params.id);
       if (!Number.isInteger(id)) return res.status(400).json({ status: 'error', error: 'буруу id' });
-      const { excluded } = req.body || {};
-      if (typeof excluded !== 'boolean') {
+      const body = req.body || {};
+      const has = (k) => Object.prototype.hasOwnProperty.call(body, k);
+      if (!has('excluded') && !has('excludedAmount')) {
+        return res.status(400).json({ status: 'error', error: 'excluded эсвэл excludedAmount шаардлагатай' });
+      }
+      if (has('excluded') && typeof body.excluded !== 'boolean') {
         return res.status(400).json({ status: 'error', error: 'excluded нь boolean байх ёстой' });
+      }
+      if (has('excludedAmount') && (typeof body.excludedAmount !== 'number'
+          || !Number.isFinite(body.excludedAmount) || body.excludedAmount < 0)) {
+        return res.status(400).json({ status: 'error', error: 'excludedAmount нь 0-ээс багагүй тоо байх ёстой' });
       }
       const row = db.getById(req.userId, id);
       if (!row) return res.status(404).json({ status: 'error', error: 'Гүйлгээ олдсонгүй' });
 
-      // Өрийн бичлэгээс үүдсэн хасалтыг шууд буцаахыг зөвшөөрөхгүй — эхлээд
-      // холбоосыг нь салгах ёстой (эс бөгөөс дэвтэр ба туг зөрөх эрсдэлтэй).
-      if (!excluded && db.isTransactionReferencedByOtherDebt(req.userId, id, null)) {
-        return res.status(409).json({
+      // excludedAmount давамгайлна; эс бөгөөс boolean → бүтэн amount / 0
+      const target = has('excludedAmount') ? body.excludedAmount : (body.excluded ? Number(row.amount) : 0);
+      if (target > Number(row.amount) + EPS) {
+        return res.status(400).json({
           status: 'error',
-          error: 'Энэ гүйлгээ өрийн бичлэгтэй холбоотой тул хасалтыг шууд буцаах боломжгүй. Эхлээд өрийн бичлэгээс салгана уу.',
+          error: `Хасах дүн гүйлгээний дүнгээс (${Number(row.amount)}) их байж болохгүй`,
         });
       }
 
-      db.setTransactionExclusion(req.userId, id, excluded);
+      // Өрийн бичлэгээс үүдсэн хасалтыг гараар ӨӨРЧЛӨХИЙГ зөвшөөрөхгүй — эхлээд
+      // холбоосыг нь салгах ёстой (эс бөгөөс дэвтрийн тооцоо ба дүн зөрнө; дараагийн
+      // дахин тооцоолол хэрэглэгчийн гар засварыг чимээгүй арилгана). Утга
+      // өөрчлөгдөхгүй (no-op) дуудалт нь өмнөх шигээ зөвшөөрөгдөнө.
+      const current = Number(row.excluded_amount) || 0;
+      if (Math.abs(target - current) > EPS && db.isTransactionReferencedByOtherDebt(req.userId, id, null)) {
+        return res.status(409).json({
+          status: 'error',
+          error: 'Энэ гүйлгээ өрийн бичлэгтэй холбоотой тул хасалтыг шууд өөрчлөх боломжгүй. Эхлээд өрийн бичлэгээс салгана уу.',
+        });
+      }
+
+      db.setTransactionExcludedAmount(req.userId, id, target);
       const updated = db.getById(req.userId, id);
-      logger.info('Төсвөөс хасалт', { id, excluded });
+      const excludedAmount = Number(updated.excluded_amount) || 0;
+      logger.info('Төсвөөс хасалт', { id, excludedAmount });
       return res.status(200).json({
         status: 'ok', id,
-        excluded: updated.excluded_from_budget === 1,
+        excluded: updated.excluded_from_budget === 1, // = БҮРЭН хасагдсан
+        excludedAmount,
+        // Төсөв/ангилалд тоологдох цэвэр дүн (үлдэгдэлд БҮТЭН amount хэвээр)
+        netAmount: Number(updated.amount) - excludedAmount,
         manuallyEdited: updated.manually_edited === 1,
       });
     } catch (err) {
+      if (err?.name === 'ExclusionError') {
+        return res.status(400).json({ status: 'error', error: err.message, code: err.code });
+      }
       logger.error('PATCH exclusion алдаа', { err: err?.message });
       return res.status(500).json({ status: 'error', error: 'Internal Server Error' });
     }
