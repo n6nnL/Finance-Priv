@@ -660,18 +660,20 @@ override ч үүсэхгүй), орлого+Тээвэр → 400, хоёулан
 - Calendar/Telegram холбогдоогүй. Telegram bot ажиллаж байна.
 - AI ангилал **унтраалттай** (`AI_CATEGORIZATION_ENABLED=false`) — credit байхгүй. Асаахад
   танигдаагүй мерчантад санал өгнө; унтраалттай үед зүгээр pending_review болно.
-- **★ Шинэ ops хэрэгсэл — OVERRIDE BACKFILL (`scripts/backfill-overrides.js`, 2026-08-07,
-  ⏸️ `--apply` ХИЙГЭЭГҮЙ, зөвхөн dry-run):** Override-ийн `friendly_name`/`default_note`-г
-  ingest ХЭЗЭЭ Ч мөрөнд бичдэггүй байсныг (§14) түүхэн мөрүүд дээр нөхөх скрипт.
-  Схем хөндөөгүй, миграц БАЙХГҮЙ, ingest pipeline (`api/classify.js`) хөндөөгүй.
-  Серверийн DB-ийн snapshot (`sqlite3 .backup`, 2026-08-07) дээрх **dry-run**:
-  `transactions` = **1,126** · `category_overrides` = **42** (бүгд `user_id=1`;
-  `user_id=3`-д гүйлгээ алга) · override-т таарсан **217** мөр · `manually_edited=1`
-  тул алгассан **74** мөр · **өөрчлөгдөх 11 мөр** (`merchant_place` 4 · `note` 7 ·
-  `category` **0** — ангилал аль хэдийн зөв, зөвхөн нэр/шалтгаан дутуу байсан).
-  11 мөр бүгд `NULL → утга` (дарж бичсэн утга алга). Snapshot-ийн хуулбар дээр
-  `--apply` → 11 мөр, дараа нь дахин dry-run → **0** (идемпотент), `manually_edited=1`
-  тоо **77 → 77** (өөрчлөгдөөгүй). **Бодит production DB-д ХАРААХАН ажиллуулаагүй.**
+- **★ Шинэ ops хэрэгсэл — OVERRIDE BACKFILL (`scripts/backfill-overrides.js`,
+  ✅ PRODUCTION-Д АЖИЛЛУУЛСАН 2026-08-07, commit `0b8747a`):** Override-ийн
+  `friendly_name`/`default_note`-г ingest ХЭЗЭЭ Ч мөрөнд бичдэггүй байсныг (§14)
+  түүхэн мөрүүд дээр нөхөв. Схем хөндөөгүй, миграц БАЙХГҮЙ, ingest pipeline
+  (`api/classify.js`) хөндөөгүй, `pm2 reload` хийгээгүй (шаардлагагүй).
+  Бодит DB дээрх үр дүн: `transactions` = **1,126** · `category_overrides` = **42**
+  (бүгд `user_id=1`; `user_id=3`-д гүйлгээ алга) · override-т таарсан **217** мөр ·
+  `manually_edited=1` тул алгассан **74** мөр · **бичигдсэн 11 мөр**
+  (`merchant_place` **4** · `note` **7** · `category` **0** — ангилал аль хэдийн зөв
+  байсан, зөвхөн газрын нэр/шалтгаан дутуу). 11 мөр бүгд `NULL → утга` —
+  **дарж бичсэн утга 0**. `manually_edited=1` тоо **77 → 77** (өөрчлөгдөөгүй).
+  Дараа нь дахин dry-run → **0 мөр** (идемпотент, бодит DB дээр батлагдсан).
+  Өмнө нь `scripts/backup.sh` (`transactions-2026-08-07_1208.sqlite.gz`,
+  `integrity_check: ok`). Хожим override нэмэгдэх бүрд дахин ажиллуулж болно.
 - **★ Сүүлийн ажил — АНГИЛЛЫН ХАМААРАЛ / applicability (018, ✅ DEPLOY ХИЙГДСЭН
   2026-08-06, commit `03b8ab8`). МИГРАЦ БАЙХГҮЙ — schema хөндөөгүй, зөвхөн одоо байгаа
   `type` баганыг УНШИНА:** Зарлаган гүйлгээн дээр ангилал сонгохдоо "Орлого" гарч,
