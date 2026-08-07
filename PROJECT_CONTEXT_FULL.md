@@ -160,6 +160,7 @@ D:\Claude\
 | `reparse.js` | Засагдсан parser-аар хуучин и-мэйлийг дахин задлаж NULL талбар нөхнө (`manually_edited=1` мөрийг ХӨНДӨХГҮЙ) |
 | `recategorize.js`, `migrate-categories.js` | Хуучин англи ангилал → канон монгол нэр (идемпотент) |
 | `repush.js` | `push_failed` гүйлгээг дахин илгээх (cron-д тавьж болно) |
+| `backfill-overrides.js` | Сурсан override-ийн `friendly_name`/`default_note`/`category`-г ХУУЧИН гүйлгээнд буцаан хэрэглэнэ (ops, дахин ажиллуулж болно). Таарал нь `classify.js`-тэй ЯГ ИЖИЛ (`normalizeMerchant` + substring, `created_at DESC`-ийн эхний таарал), POS→`merchant_place` / бусад→`note` нь `config/transactionActions.js`-ээс. **Default = dry-run**, бичихэд `--apply` (BEGIN…COMMIT/ROLLBACK), `--user <id>`, `--db <зам>`. `manually_edited=1` мөрийг ХӨНДӨХГҮЙ, туг ч тавихгүй |
 | `backup.sh` | Хоёр SQLite-ийн өдөр тутмын backup (VPS) |
 | `*.verify.mjs` (5) | Жинхэнэ `createApp` + `:memory:` DB дээр end-to-end шалгалт (Discord flow, budget, analytics, ops-notify) |
 
@@ -648,6 +649,7 @@ override ч үүсэхгүй), орлого+Тээвэр → 400, хоёулан
 | ⚠️ **018: ангиллын picker нь ТӨРЛӨӨР шүүгддэг** | Ангиллын сонголт бүр (Dashboard `RowPanel` + `ConfirmModal`, Discord товч/select, Telegram keyboard) `isCategoryAllowedFor(category, row.type)`-оор шүүгдэнэ. Шинэ picker/клиент нэмэхдээ **бүтэн `CATEGORIES`-г шууд рендерлэхийг ХОРИГЛОНО** — `categoriesFor(type)` (нэрээр кодлодог UI) эсвэл `listCategoriesWithIndexFor(type)` (индексээр кодлодог bot) ашиглана. Сервер тал ч шалгана (`PATCH /:id/category` → 400) |
 | ⚠️ **018: BOT-ЫН ИНДЕКСИЙН УРХИ** | Discord/Telegram нь сонгосон ангиллыг customId/`callback_data` дотор **бүтэн `CATEGORIES` массив дахь ИНДЕКСЭЭР** дамжуулж, `categoryByIndex()`-ээр задалдаг (мөрийн урт хязгаартай тул). Хэрэв `CATEGORIES.filter(...)` хийгээд **шүүсэн массивын шинэ индексийг** кодловол товч бүр **БУРУУ ангилал** илгээнэ — алдаа мэдэгдэхгүй, `applyToAll` нь мерчантын БҮХ түүхэнд тараана. Тиймээс `listCategoriesWithIndexFor(type)` нь `{category, index}` хос буцаана: **`index`-ийг кодол, давталтын байрлалыг (pos) зөвхөн эгнээ таслахад ашигла**. Эгнээ таслах давталтыг ч **шүүсэн** жагсаалтын уртаар бич (`CATEGORIES.length` БИШ). Discord-ийн засварын select нь НЭРЭЭР кодлодог тул энэ урхинд өртөхгүй. `test/categoryButtonIndex.test.js` + хоёр bot-ийн `category-filter.test.js` үүнийг түгжсэн |
 | ⚠️ **018: хуучин "хууль бус" мөрүүд** | Applicability нэмэгдэхээс ӨМНӨ үүссэн зөрчилтэй мөр (ж: `income` + `Тээвэр`) **ХЭВЭЭР үлдэнэ — миграц хийгээгүй** (зориуд). `catLabel/catEmoji/catHex` нь applicability үл харах тул жагсаалтад хэвийн харагдана. Ганц ялгаа: засварын panel-д тухайн утга сонголтын жагсаалтад байхгүй тул **идэвхтэй товч харагдахгүй** — хэрэглэгч зөвшөөрөгдсөн утга сонгож л засна |
+| ⚠️ **Override нь ЗӨВХӨН ingest дээр, тэр ч дутуу** | `classify.js` нь таарсан override-оос **ЗӨВХӨН `category`**-г авдаг — `friendly_name` (газрын нэр) ба `default_note` (шалтгаан) нь гүйлгээний мөрөнд **ХЭЗЭЭ Ч бичигддэггүй**. Тэдгээр нь зөвхөн УНШИХ үед `attachOverrideInfo()`-оор virtual-аар хавсрагдана (`friendly_name`/`override_note` талбар), эсвэл `applyToAll` баталгаажуулалтын АГШИНД `updateCategoryByPattern()` тухайн үед байсан мөрүүдэд бичнэ (мөн `manually_edited=1` тавина). Тиймээс override үүсэхээс ӨМНӨХ ч, ХОЙНОХ ч автомат мөрүүд газрын нэр/шалтгаангүй хоцордог → түүхэн мөрийг [`scripts/backfill-overrides.js`](scripts/backfill-overrides.js)-ээр эвлэрүүлнэ (§3.5). Backfill-ийн таарал нь ingest-тэйгээ ЯГ ИЖИЛ байх ЁСТОЙ, эс бөгөөс дараагийн ingest backfill-ийн тавьсныг эргүүлж дарна |
 | Хасалтын хязгаар хаана хэрэгжсэн бэ | `excluded_amount ≥ 0` — **баганын CHECK**. `excluded_amount ≤ amount` — SQLite-д cross-column CHECK бичих боломжгүй тул **API давхарга (`setTransactionExcludedAmount`) + 2 trigger** (INSERT/UPDATE, `1e-6` хүлцэлтэй). Float нийлбэрийн бөөрөнхийлөлт "бүрэн хасагдсан"-ыг эвдэхээс сэргийлж `EXCLUSION_EPS = 1e-6` хэрэглэдэг |
 
 ---
@@ -658,6 +660,18 @@ override ч үүсэхгүй), орлого+Тээвэр → 400, хоёулан
 - Calendar/Telegram холбогдоогүй. Telegram bot ажиллаж байна.
 - AI ангилал **унтраалттай** (`AI_CATEGORIZATION_ENABLED=false`) — credit байхгүй. Асаахад
   танигдаагүй мерчантад санал өгнө; унтраалттай үед зүгээр pending_review болно.
+- **★ Шинэ ops хэрэгсэл — OVERRIDE BACKFILL (`scripts/backfill-overrides.js`, 2026-08-07,
+  ⏸️ `--apply` ХИЙГЭЭГҮЙ, зөвхөн dry-run):** Override-ийн `friendly_name`/`default_note`-г
+  ingest ХЭЗЭЭ Ч мөрөнд бичдэггүй байсныг (§14) түүхэн мөрүүд дээр нөхөх скрипт.
+  Схем хөндөөгүй, миграц БАЙХГҮЙ, ingest pipeline (`api/classify.js`) хөндөөгүй.
+  Серверийн DB-ийн snapshot (`sqlite3 .backup`, 2026-08-07) дээрх **dry-run**:
+  `transactions` = **1,126** · `category_overrides` = **42** (бүгд `user_id=1`;
+  `user_id=3`-д гүйлгээ алга) · override-т таарсан **217** мөр · `manually_edited=1`
+  тул алгассан **74** мөр · **өөрчлөгдөх 11 мөр** (`merchant_place` 4 · `note` 7 ·
+  `category` **0** — ангилал аль хэдийн зөв, зөвхөн нэр/шалтгаан дутуу байсан).
+  11 мөр бүгд `NULL → утга` (дарж бичсэн утга алга). Snapshot-ийн хуулбар дээр
+  `--apply` → 11 мөр, дараа нь дахин dry-run → **0** (идемпотент), `manually_edited=1`
+  тоо **77 → 77** (өөрчлөгдөөгүй). **Бодит production DB-д ХАРААХАН ажиллуулаагүй.**
 - **★ Сүүлийн ажил — АНГИЛЛЫН ХАМААРАЛ / applicability (018, ✅ DEPLOY ХИЙГДСЭН
   2026-08-06, commit `03b8ab8`). МИГРАЦ БАЙХГҮЙ — schema хөндөөгүй, зөвхөн одоо байгаа
   `type` баганыг УНШИНА:** Зарлаган гүйлгээн дээр ангилал сонгохдоо "Орлого" гарч,
