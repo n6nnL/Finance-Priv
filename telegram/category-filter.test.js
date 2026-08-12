@@ -23,9 +23,9 @@ function decodeKb(kb) {
   return out;
 }
 
-test('ЗАРЛАГА: "Орлого" товч БАЙХГҮЙ, 9 товч', () => {
+test('ЗАРЛАГА: "Орлого" товч БАЙХГҮЙ, 11 товч', () => {
   const btns = decodeKb(buildCategoryKeyboard(42, false, 'c', 'expense'));
-  assert.equal(btns.length, 9);
+  assert.equal(btns.length, 11); // 018: 12 ангилал − Орлого
   assert.ok(!btns.some((b) => b.label === 'Орлого'), '"Орлого" зарлагад гарах ЁСГҮЙ');
 });
 
@@ -54,9 +54,9 @@ test('эгнээнд дээд тал нь 5 товч, хоосон эгнээг�
   }
 });
 
-test('type өгөөгүй (хуучин дуудлага) → бүх 10 товч, задаргаа зөв (fail-open)', () => {
+test('type өгөөгүй (хуучин дуудлага) → бүх 12 товч, задаргаа зөв (fail-open)', () => {
   const btns = decodeKb(buildCategoryKeyboard(42, false));
-  assert.equal(btns.length, 10);
+  assert.equal(btns.length, 12);
   for (const b of btns) assert.equal(b.decoded, b.label);
 });
 
@@ -68,6 +68,6 @@ test('keyboardFor нь tx.type-г builder рүү дамжуулна (pending м�
 
   const expense = { id: 8, type: 'expense', is_pos: 1, status: 'pending_review', category: null };
   const expCats = decodeKb(keyboardFor(expense)).filter((b) => b.kind === 'c');
-  assert.equal(expCats.length, 9);
+  assert.equal(expCats.length, 11);
   assert.ok(!expCats.some((b) => b.label === 'Орлого'));
 });

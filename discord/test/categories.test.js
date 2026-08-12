@@ -7,10 +7,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { CATEGORIES, categoryById, idOfCategory, encodeButtonId, encodeModalId, parseId } from '../categories.js';
 
-test('10 ангилал', () => {
-  assert.equal(CATEGORIES.length, 10);
+test('12 ангилал (018-д 2 нэмэгдсэн, ТӨГСГӨЛД)', () => {
+  assert.equal(CATEGORIES.length, 12);
   assert.equal(CATEGORIES[0], 'Гадуур хооллолт');
-  assert.equal(CATEGORIES[9], 'Бусад');
+  assert.equal(CATEGORIES[9], 'Бусад');          // хуучин эрэмбэ ХӨДӨЛӨӨГҮЙ
+  assert.equal(CATEGORIES[10], 'Эрүүл мэнд');
+  assert.equal(CATEGORIES[11], 'Орон сууц & коммунал');
 });
 
 test('categoryById / idOfCategory', () => {

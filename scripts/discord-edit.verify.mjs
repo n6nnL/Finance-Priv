@@ -60,8 +60,8 @@ try {
   ok('pending_review мессеж → ангиллын товчлуурууд (Prompt 2 хадгалагдсан)');
 
   // select зөвхөн 10 ангилалтай (free text биш)
-  assert.strictEqual(CATEGORIES.length, 10);
-  ok(`Select-д зориулсан ангилал = 10 (13 биш): ${CATEGORIES.join(', ')}`);
+  assert.strictEqual(CATEGORIES.length, 12);
+  ok(`Select-д зориулсан ангилал = 12 (018-д +2): ${CATEGORIES.join(', ')}`);
 
   // ---------- [B] Verification 1: category edit → persist + manually_edited + override ----------
   console.log('\n[B] Discord category edit (PATCH /:id/category) — persist + override');

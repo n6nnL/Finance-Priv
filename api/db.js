@@ -17,7 +17,7 @@ import { readFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isoDate } from '../config/txfields.js';
-import { DEFAULT_CATEGORY } from '../config/categories.js';
+import { DEFAULT_CATEGORY, subcategoryValid } from '../config/categories.js';
 import { encryptToken, decryptToken, isEncrypted } from '../config/tokenCrypto.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -418,6 +418,28 @@ export function createDb(dbPath, opts = {}) {
     if (!hasColumn('transactions', 'email_received_at')) {
       db.exec('ALTER TABLE transactions ADD COLUMN email_received_at TEXT');
     }
+
+    // 018: ДЭД АНГИЛАЛ (subcategory) ------------------------------------------
+    // ⚠️ ДУГААРЛАЛТЫН ТӨӨРӨГДӨЛ: §15-д "018" (applicability) ба "019" (тогтмол id)
+    //    гэж бичигдсэн нь ФИЧЕРИЙН БАГЦЫН шошго — тэдгээр нь миграц НЭМЭЭГҮЙ.
+    //    Миграцын жинхэнэ гинж 017-д зогссон тул ЭНЭ нь 018 дугаартай.
+    //
+    // Ангилал доторх нарийвчлал: 'Эрүүл мэнд' → 'Шүд' г.м. Хоёр хүснэгтэд нэмнэ:
+    //   • transactions.subcategory      — тухайн гүйлгээний дэд ангилал
+    //   • category_overrides.subcategory — сурсан дэд ангилал (ingest дээр хэрэглэнэ)
+    //
+    // ⚠️ Хадгалагдах утга нь МОНГОЛ LABEL (ангиллынхтай ЯГ ИЖИЛ гэрээ) — id БИШ.
+    // ⚠️ Nullable, DEFAULT NULL, **BACKFILL ХИЙХГҮЙ** — 012/017-тэй ижил философи:
+    //    одоо байгаа БҮХ мөр NULL хэвээр үлдэнэ (хуурамч утга гаргахгүй). Дэд
+    //    ангилал нь зөвхөн learned override эсвэл хэрэглэгчийн засвараар л орно;
+    //    keyword-оор ХЭЗЭЭ Ч таамаглахгүй.
+    // ⚠️ Аналитикийн query бүр NULL-ыг ТЭВЧИХ ёстой (GROUP BY-д NULL нь бүлэг болно).
+    if (!hasColumn('transactions', 'subcategory')) {
+      db.exec('ALTER TABLE transactions ADD COLUMN subcategory TEXT');
+    }
+    if (!hasColumn('category_overrides', 'subcategory')) {
+      db.exec('ALTER TABLE category_overrides ADD COLUMN subcategory TEXT');
+    }
   }
   migrate();
 
@@ -447,11 +469,11 @@ export function createDb(dbPath, opts = {}) {
     INSERT OR IGNORE INTO transactions
       (user_id, message_id, amount, currency, txn_date, description, type, category,
        account_last4, raw, status, ai_suggested_category, ai_confidence, is_pos, account_balance,
-       email_received_at)
+       email_received_at, subcategory)
     VALUES
       (@user_id, @message_id, @amount, @currency, @txn_date, @description, @type, @category,
        @account_last4, @raw, @status, @ai_suggested_category, @ai_confidence, @is_pos, @account_balance,
-       @email_received_at)`);
+       @email_received_at, @subcategory)`);
   const byIdStmt = db.prepare('SELECT * FROM transactions WHERE id = ? AND user_id = ?');
   const byMsgStmt = db.prepare('SELECT * FROM transactions WHERE message_id = ? AND user_id = ?');
 
@@ -475,6 +497,9 @@ export function createDb(dbPath, opts = {}) {
       account_balance: tx.balance ?? null,
       // Мэдэгдэл ирсэн цаг (017) — listener илгээгээгүй бол NULL (цаггүй мөр).
       email_received_at: tx.emailReceivedAt ?? null,
+      // Дэд ангилал (018) — listener ХЭЗЭЭ Ч илгээхгүй. Утга орох ганц зам нь
+      // classify.js-ийн таарсан override; өөр тохиолдолд ҮРГЭЛЖ NULL.
+      subcategory: tx.subcategory ?? null,
     };
     const res = insertStmt.run(row);
     if (res.changes > 0) {
@@ -741,33 +766,55 @@ export function createDb(dbPath, opts = {}) {
     return { rows: attachOverrideInfo(userId, rows), total: Number(total), limit: lim, offset: off };
   }
 
+  /**
+   * ★ ГЭРЭЭ (018): мөрийн `subcategory` нь ҮРГЭЛЖ түүний `category`-д харьяалагдана.
+   * Ангилал өөрчлөгдөхөд хуучин дэд ангилал өнчирч болзошгүй тул:
+   *   • хэрэглэгч тодорхой дэд ангилал өгсөн бол → ТЭР нь ялна,
+   *   • өгөөгүй бол → хуучин утга ШИНЭ ангилалд ч хүчинтэй бол ХАДГАЛНА,
+   *     хүчингүй болсон бол NULL болгож ЦЭВЭРЛЭНЭ.
+   * Ингэснээр "Тээвэр + Шүд" гэх ГАЖ хос ХЭЗЭЭ Ч үүсэхгүй.
+   */
+  function _resolveSub(newCategory, existingSub, providedSub) {
+    if (providedSub != null && String(providedSub).trim()) return String(providedSub).trim();
+    if (existingSub && subcategoryValid(newCategory, existingSub)) return existingSub;
+    return null;
+  }
+
   const _updateCatById = db.prepare(`UPDATE transactions
-    SET category=@category, status='classified', note=COALESCE(@note,note),
+    SET category=@category, subcategory=@subcategory, status='classified', note=COALESCE(@note,note),
         merchant_place=COALESCE(@place,merchant_place), ai_suggested_category=NULL, ai_confidence=NULL,
         manually_edited=1
     WHERE id=@id AND user_id=@user_id`);
 
-  function updateCategoryById(userId, id, category, { note = null, merchantPlace = null } = {}) {
+  function updateCategoryById(userId, id, category, { note = null, merchantPlace = null, subcategory = null } = {}) {
+    const cur = byIdStmt.get(id, userId);
+    if (!cur) return 0;
     return _updateCatById.run({ id, user_id: userId, category,
+      subcategory: _resolveSub(category, cur.subcategory, subcategory),
       note: note && String(note).trim() ? String(note).trim() : null,
       place: merchantPlace && String(merchantPlace).trim() ? String(merchantPlace).trim() : null }).changes;
   }
 
-  function updateCategoryByPattern(userId, pattern, category, { note = null, merchantPlace = null } = {}) {
+  function updateCategoryByPattern(userId, pattern, category, { note = null, merchantPlace = null, subcategory = null } = {}) {
     const np = normalizeMerchant(pattern);
     if (!np) return 0;
-    const all = db.prepare('SELECT id, description FROM transactions WHERE user_id=?').all(userId);
-    const ids = all.filter((r) => normalizeMerchant(r.description).includes(np)).map((r) => r.id);
-    if (!ids.length) return 0;
+    // subcategory-г мөр тус бүрд шийдэх тул одоогийн утгыг нь хамт татна
+    const all = db.prepare('SELECT id, description, subcategory FROM transactions WHERE user_id=?').all(userId);
+    const hits = all.filter((r) => normalizeMerchant(r.description).includes(np));
+    if (!hits.length) return 0;
     const noteV = note && String(note).trim() ? String(note).trim() : null;
     const placeV = merchantPlace && String(merchantPlace).trim() ? String(merchantPlace).trim() : null;
-    const upd = db.prepare(`UPDATE transactions SET category=?, status='classified',
+    const upd = db.prepare(`UPDATE transactions SET category=?, subcategory=?, status='classified',
       note=COALESCE(?,note), merchant_place=COALESCE(?,merchant_place),
       ai_suggested_category=NULL, ai_confidence=NULL, manually_edited=1 WHERE id=? AND user_id=?`);
     db.exec('BEGIN');
-    try { for (const id of ids) upd.run(category, noteV, placeV, id, userId); db.exec('COMMIT'); }
-    catch (e) { db.exec('ROLLBACK'); throw e; }
-    return ids.length;
+    try {
+      for (const r of hits) {
+        upd.run(category, _resolveSub(category, r.subcategory, subcategory), noteV, placeV, r.id, userId);
+      }
+      db.exec('COMMIT');
+    } catch (e) { db.exec('ROLLBACK'); throw e; }
+    return hits.length;
   }
 
   // Тэмдэглэл/газрын нэрийг ангилал ХӨНДӨЛГҮЙ засах. undefined талбарт ГАР
@@ -800,20 +847,29 @@ export function createDb(dbPath, opts = {}) {
   }
 
   // ===================== OVERRIDES (per-user) =====================
+  // ⚠️ subcategory (018) нь `category`-тай ХАМТ дарж бичигдэнэ (COALESCE БИШ) —
+  // ангилал өөрчлөгдөхөд хуучин дэд ангилал өнчрөх ёсгүй. Дэд ангилалгүйгээр
+  // override шинэчлэгдвэл subcategory NULL болно (энэ нь ЗӨВ: шинэ ангилалд
+  // харьяалагдахгүй хуучин утга үлдэхээс NULL нь дээр).
   const _addOverride = db.prepare(`
-    INSERT INTO category_overrides (user_id, merchant_pattern, category, friendly_name, default_note)
-    VALUES (@user_id, @pattern, @category, @friendly, @note)
+    INSERT INTO category_overrides (user_id, merchant_pattern, category, friendly_name, default_note, subcategory)
+    VALUES (@user_id, @pattern, @category, @friendly, @note, @subcategory)
     ON CONFLICT(user_id, merchant_pattern) DO UPDATE SET
       category = excluded.category,
+      subcategory = excluded.subcategory,
       friendly_name = COALESCE(excluded.friendly_name, category_overrides.friendly_name),
       default_note  = COALESCE(excluded.default_note, category_overrides.default_note)`);
 
-  function addOverride(userId, pattern, category, friendlyName = null, defaultNote = null) {
+  function addOverride(userId, pattern, category, friendlyName = null, defaultNote = null, subcategory = null) {
     const np = normalizeMerchant(pattern);
     if (!np) return null;
+    const sub = subcategory && String(subcategory).trim() ? String(subcategory).trim() : null;
     _addOverride.run({ user_id: userId, pattern: np, category,
       friendly: friendlyName && String(friendlyName).trim() ? String(friendlyName).trim() : null,
-      note: defaultNote && String(defaultNote).trim() ? String(defaultNote).trim() : null });
+      note: defaultNote && String(defaultNote).trim() ? String(defaultNote).trim() : null,
+      // Гэрээ хамгаалалт: харьяалагдахгүй утга override-д ОРОХГҮЙ (route аль хэдийн
+      // 400 өгдөг ч энэ нь DB давхаргын сүүлчийн хамгаалалт).
+      subcategory: sub && subcategoryValid(category, sub) ? sub : null });
     return db.prepare('SELECT * FROM category_overrides WHERE user_id=? AND merchant_pattern=?').get(userId, np);
   }
 

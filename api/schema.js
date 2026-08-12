@@ -4,7 +4,7 @@
 //  Каноник гэрээ (listener prompt-той ижил):
 //    messageId (заавал, string), amount (заавал, эерэг тоо),
 //    currency, date (ISO), type ('expense'|'income'),
-//    description?, category?, accountLast4?, raw?
+//    description?, category?, subcategory?, accountLast4?, raw?
 //
 //  Listener одоогийн хувилбар нь дараах alias-уудыг явуулж болзошгүй тул
 //  тэвчиж хувиргана (хоёр тал бат бөх нийцэхийн тулд):
@@ -50,6 +50,10 @@ export const TransactionSchema = z.object({
     errorMap: () => ({ message: "type нь 'expense' эсвэл 'income' байх ёстой" }),
   }),
   category: z.string().max(200).optional().nullable(),
+  // Дэд ангилал (018) — listener ХЭЗЭЭ Ч илгээхгүй тул ingest дээр ҮРГЭЛЖ NULL.
+  // Гэрээг нээлттэй байлгахын тулд schema-д зөвшөөрөгдсөн (нийцтэй байдал), гэхдээ
+  // route нь classify.js-ийн шийдвэрийг л бичдэг — body-гийн утга давамгайлахгүй.
+  subcategory: z.string().max(200).optional().nullable(),
   accountLast4: z.string().max(8).optional().nullable(),
   raw: z.string().optional().nullable(),
   isPos: z.boolean().optional().nullable(), // listener parser-аас (BOM дүрэм)

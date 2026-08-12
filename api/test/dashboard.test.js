@@ -136,7 +136,7 @@ test('GET /api/summary + /monthly + /categories', async () => {
   const m = await (await get('/api/monthly')).json();
   assert.ok(Array.isArray(m.data) && m.data.length >= 1);
   const c = await (await get('/api/categories')).json();
-  assert.equal(c.categories.length, 10);
+  assert.equal(c.categories.length, 12); // 018: +Эрүүл мэнд, +Орон сууц & коммунал
 });
 
 test('GET /pending зөвхөн pending_review', async () => {

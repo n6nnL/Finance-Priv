@@ -57,9 +57,9 @@ test('CATEGORY_APPLICABILITY нь 10 ангилал БҮРИЙГ хамарна'
   }
 });
 
-test('categoriesFor: зарлагад 9 (Орлого-гүй), орлогод 3', () => {
+test('categoriesFor: зарлагад 11 (Орлого-гүй), орлогод 3', () => {
   const exp = categoriesFor('expense');
-  assert.equal(exp.length, 9);
+  assert.equal(exp.length, 11); // 018: 12 ангилал − Орлого
   assert.ok(!exp.includes(INCOME_CATEGORY), 'зарлагад "Орлого" БАЙХ ЁСГҮЙ');
 
   const inc = categoriesFor('income');

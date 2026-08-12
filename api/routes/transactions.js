@@ -19,7 +19,9 @@ import { EXCLUSION_EPS as EPS } from '../db.js';
 import { validateTransaction } from '../schema.js';
 import { classifyTransaction } from '../classify.js';
 import { listCategories, isPosDescription } from '../categorize.js';
-import { isCategoryAllowedFor, categoriesFor } from '../../config/categories.js';
+import {
+  isCategoryAllowedFor, categoriesFor, subcategoryValid, subcategoriesForCategory,
+} from '../../config/categories.js';
 import { logger } from '../logger.js';
 
 /**
@@ -88,6 +90,9 @@ export function createTransactionsRouter({ db, ai }) {
         ...tx,
         userId,
         category: decision.category,
+        // 018: дэд ангилал ЗӨВХӨН таарсан override-оос ирнэ (classify.js);
+        // listener-ийн body-д ирсэн утга ЭНД давамгайлахгүй.
+        subcategory: decision.subcategory ?? null,
         status: decision.status,
         aiSuggestedCategory: decision.aiSuggestedCategory,
         aiConfidence: decision.aiConfidence,
@@ -164,12 +169,14 @@ export function createTransactionsRouter({ db, ai }) {
   });
 
   // ---- PATCH /api/transactions/:id/category — баталгаажуулах (ухаалаг) ----
-  // Body: { category, applyToAll, note?, merchantPlace? (POS газрын нэр) }
+  // Body: { category, applyToAll, note?, merchantPlace? (POS газрын нэр), subcategory? }
   // POS бол merchantPlace (→override.friendly_name), POS биш бол note (→override.default_note).
+  // 018: subcategory нь СОНГОЛТТОЙ; өгсөн бол мөрийн ангилалд ХАРЬЯАЛАГДАХ ёстой (400).
   router.patch('/:id/category', (req, res) => {
     try {
       const id = Number(req.params.id);
       const { category, applyToAll } = req.body || {};
+      const subcategoryRaw = req.body?.subcategory;
       // merchantPlace = POS газрын нэр; friendlyName-г alias болгон зөвшөөрнө
       const merchantPlace = (req.body?.merchantPlace ?? req.body?.friendlyName ?? '').toString().trim();
       const note = (req.body?.note ?? '').toString().trim();
@@ -202,21 +209,40 @@ export function createTransactionsRouter({ db, ai }) {
       // ⚠️ Override (сурах) нь ЗӨВХӨН хэрэглэгч applyToAll-ыг ТОДОРХОЙ сонгосон
       // үед. Газрын нэр/шалтгаан дангаараа сурахад ХҮРГЭХГҮЙ — тэдгээр нь
       // learn=false үед доорх updateCategoryById-ээр тухайн ГАНЦ мөрөнд хадгална.
+      // ---- Дэд ангилал ↔ ангиллын ХАРЬЯАЛАЛ (018, server-side backstop) ----
+      // Сонголттой талбар: байхгүй/null → өнгөрнө (одоогийн зан төлөв хэвээр).
+      // Өгсөн бол ЗААВАЛ энэ ангилалд харьяалагдана — эс бөгөөс 400, мөр
+      // ХӨНДӨГДӨХГҮЙ (override ч үүсэхгүй). Дүрэм нь config/categories.js-д.
+      let subcategory = null;
+      if (subcategoryRaw != null && String(subcategoryRaw).trim() !== '') {
+        subcategory = String(subcategoryRaw).trim();
+        if (!subcategoryValid(category, subcategory)) {
+          const allowed = subcategoriesForCategory(category).map((s) => s.label);
+          return res.status(400).json({
+            status: 'error',
+            error: allowed.length
+              ? `"${subcategory}" дэд ангилал "${category}"-д харьяалагдахгүй. Боломжит: ${allowed.join(', ')}`
+              : `"${category}" ангилалд дэд ангилал байхгүй`,
+          });
+        }
+      }
+
       const learn = !!applyToAll;
-      const extra = { note: note || null, merchantPlace: merchantPlace || null };
+      const extra = { note: note || null, merchantPlace: merchantPlace || null, subcategory };
 
       let updated = 1;
       let override = null;
       if (learn) {
         const pattern = db.normalizeMerchant(row.description);
         updated = db.updateCategoryByPattern(req.userId, pattern, category, extra);
-        // override: POS газрын нэр → friendly_name, шалтгаан → default_note
-        override = db.addOverride(req.userId, pattern, category, merchantPlace || null, note || null);
+        // override: POS газрын нэр → friendly_name, шалтгаан → default_note,
+        // дэд ангилал → subcategory (дараагийн ижил мерчант ХОЁУЛАНГ нь авна)
+        override = db.addOverride(req.userId, pattern, category, merchantPlace || null, note || null, subcategory);
       } else {
         db.updateCategoryById(req.userId, id, category, extra);
       }
-      logger.info('Баталгаажлаа', { id, category, applyToAll: learn, place: !!merchantPlace, note: !!note, updated });
-      return res.status(200).json({ status: 'ok', id, category, updated, override });
+      logger.info('Баталгаажлаа', { id, category, subcategory, applyToAll: learn, place: !!merchantPlace, note: !!note, updated });
+      return res.status(200).json({ status: 'ok', id, category, subcategory, updated, override });
     } catch (err) {
       logger.error('PATCH category алдаа', { err: err?.message });
       return res.status(500).json({ status: 'error', error: 'Internal Server Error' });

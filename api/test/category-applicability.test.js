@@ -125,9 +125,11 @@ test('POST /overrides + хоёуланд тохирох ангилал → 201',
 
 // ---- Регресс: жагсаалтын endpoint ШҮҮГДЭХГҮЙ ----
 
-test('GET /api/categories — БҮХ 10-г буцаасан хэвээр (шүүлт нь picker-ийн ажил)', async () => {
+test('GET /api/categories — БҮХ 12-г буцаасан хэвээр (шүүлт нь picker-ийн ажил)', async () => {
   const r = await fetch(`${baseUrl}/api/categories`, { headers: { 'X-API-Key': API_KEY } });
   const j = await r.json();
-  assert.equal(j.categories.length, 10);
+  assert.equal(j.categories.length, 12); // 018-д Эрүүл мэнд + Орон сууц нэмэгдсэн
   assert.ok(j.categories.includes('Орлого'));
+  assert.ok(j.categories.includes('Эрүүл мэнд'));
+  assert.ok(j.categories.includes('Орон сууц & коммунал'));
 });

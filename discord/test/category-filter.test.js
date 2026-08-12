@@ -25,9 +25,9 @@ function decodeRows(rows) {
   return out;
 }
 
-test('ЗАРЛАГА: "Орлого" товч БАЙХГҮЙ, 9 товч', () => {
+test('ЗАРЛАГА: "Орлого" товч БАЙХГҮЙ, 11 товч', () => {
   const btns = decodeRows(buildButtonRows(42, false, 'expense'));
-  assert.equal(btns.length, 9);
+  assert.equal(btns.length, 11); // 018: 12 ангилал − Орлого
   assert.ok(!btns.some((b) => b.label === 'Орлого'), '"Орлого" зарлагад гарах ЁСГҮЙ');
 });
 
@@ -55,9 +55,27 @@ test('эгнээнд дээд тал нь 5 товч (Discord-ийн хязга�
   }
 });
 
-test('type өгөөгүй (хуучин дуудлага) → бүх 10 товч, задаргаа зөв (fail-open)', () => {
+// ★ 018-д ангилал 10 → 12 болсон тул мессежийн ЭГНЭЭНИЙ ТОО Discord-ийн
+// хатуу хязгаарт (мессежид 5 action row, нийт 25 товч) багтахыг ЗААВАЛ шалгана.
+// Зарлага: 11 ангилал → 3 эгнээ + "талбар засах" 1 эгнээ = 4 ≤ 5. Нөөц: 1 эгнээ,
+// өөрөөр хэлбэл ангилал 20 хүрэхэд энэ тест УНАНА (тэр үед хуудаслалт хэрэгтэй).
+test('★ мессежийн эгнээ ≤5, товч ≤25 (12 ангилал дээр ч багтана)', () => {
+  for (const type of ['expense', 'income']) {
+    const tx = { id: 9, type, is_pos: 0, status: 'pending_review', category: null };
+    const comps = buildComponentsFor(tx);
+    assert.ok(comps.length <= 5,
+      `${type}: мессежид ${comps.length} эгнээ — Discord дээд тал нь 5`);
+    const total = comps.reduce((n, r) => n + r.components.length, 0);
+    assert.ok(total <= 25, `${type}: нийт ${total} товч — Discord дээд тал нь 25`);
+  }
+  // Зарлага дээрх бодит тоо (регресс — өсөхөд анхаарал татна)
+  const expense = buildComponentsFor({ id: 9, type: 'expense', is_pos: 0, status: 'pending_review', category: null });
+  assert.equal(expense.length, 4, '11 ангилал → 3 эгнээ + талбарын эгнээ');
+});
+
+test('type өгөөгүй (хуучин дуудлага) → бүх 12 товч, задаргаа зөв (fail-open)', () => {
   const btns = decodeRows(buildButtonRows(42, false));
-  assert.equal(btns.length, 10);
+  assert.equal(btns.length, 12);
   for (const b of btns) assert.equal(b.decoded, b.label);
 });
 
@@ -70,6 +88,6 @@ test('buildComponentsFor нь tx.type-г builder рүү дамжуулна', () 
 
   const expense = { id: 8, type: 'expense', is_pos: 1, status: 'pending_review', category: null };
   const expBtns = decodeRows(buildComponentsFor(expense).slice(0, -1));
-  assert.equal(expBtns.length, 9);
+  assert.equal(expBtns.length, 11);
   assert.ok(!expBtns.some((b) => b.label === 'Орлого'));
 });

@@ -72,7 +72,7 @@ D:\Claude\
 
 | Файл | Үүрэг |
 |---|---|
-| `categories.js` | **★ Single source:** 10 ангиллын нэр, **ТОГТМОЛ id** + emoji + hex metadata (`CATEGORY_META`), keyword дүрэм, `matchByKeywords()`, `OLD_TO_NEW` mapping. **+ ТОГТМОЛ ID (019):** `CATEGORY_META[c].id` (`dining`/`grocery`/`transport`/`income`/`transfer`/`subs`/`edu`/`leisure`/`apparel`/`other`) + `byId(id)` / `idFor(category)` (Map-аар, **массив руу ХЭЗЭЭ Ч индекслэхгүй**) + `listCategoriesWithIdFor(type)` (bot-д — `{category, id}` хос). Модуль ачаалахад id дутуу/давхардсан бол шууд throw. **+ ХАМААРАЛ (applicability):** `CATEGORY_APPLICABILITY` (ангилал → `['income']`/`['expense']`/хоёул), `isCategoryAllowedFor(category, type)` (★ ганц предикат, fail-open), `categoriesFor(type)`. Backend, listener, frontend ГУРВУУЛАА эндээс импортолно |
+| `categories.js` | **★ Single source:** **12** ангиллын нэр, **ТОГТМОЛ id** + emoji + hex metadata (`CATEGORY_META`), keyword дүрэм, `matchByKeywords()`, `OLD_TO_NEW` mapping. **+ ДЭД АНГИЛАЛ (018):** `SUBCATEGORIES` (эцгийн id → эрэмбэлэгдсэн `{id,label}` жагсаалт) + `subcategoriesFor(categoryId)` / `subcategoriesForCategory(нэр\|id)` / **`subcategoryValid(category, subLabel)`** (★ ганц предикат, **FAIL-CLOSED**) / `subcategoryLabel(catId, subId)`. Дэд ангилалгүй ангилал → **хоосон массив** (хэвийн төлөв). Модуль ачаалахад таксономийн бүтэц шалгагдаж, эвдэрсэн бол throw. **+ ТОГТМОЛ ID (019):** `CATEGORY_META[c].id` (`dining`/`grocery`/`transport`/`income`/`transfer`/`subs`/`edu`/`leisure`/`apparel`/`other`) + `byId(id)` / `idFor(category)` (Map-аар, **массив руу ХЭЗЭЭ Ч индекслэхгүй**) + `listCategoriesWithIdFor(type)` (bot-д — `{category, id}` хос). Модуль ачаалахад id дутуу/давхардсан бол шууд throw. **+ ХАМААРАЛ (applicability):** `CATEGORY_APPLICABILITY` (ангилал → `['income']`/`['expense']`/хоёул), `isCategoryAllowedFor(category, type)` (★ ганц предикат, fail-open), `categoriesFor(type)`. Backend, listener, frontend ГУРВУУЛАА эндээс импортолно |
 | `transactionActions.js` | **★ Single source (үйлдлийн капабилити):** гүйлгээн дээр ЯМАР үйлдэл боломжтой, ЯМАР талбар асуухыг тодорхойлно. `availableActions(txn)`, `detailFieldFor(txn)` (POS→`merchantPlace`/"Газрын нэр", бусад→`note`/"Шалтгаан"), `isPosTxn`, `isPendingTxn`, `findAction`, `APPLY_TO_ALL_CONFIRM` (баталгаажуулалтын ижил текст). Discord/Telegram/Dashboard ГУРВУУЛАА эндээс уншина — өнгө/байрлал/API дуудлага энд ОРОХГҮЙ |
 | `tokenCrypto.js` | AES-256-GCM `encryptToken/decryptToken/isEncrypted`. Формат `enc:v1:<iv>:<tag>:<ct>`. `TOKEN_ENC_KEY` (64 hex) |
 | `txfields.js` | `detectIsPos(desc)` (BOM дүрэм), `isoDate(s, {anchored})`, **`isoInstant(v)`** (имэйлийн `Date:` → ISO UTC, буруу/байхгүй бол `null`), **`ubTimeLabel(iso)`** (ISO UTC → УБ `HH:mm`, Intl `Asia/Ulaanbaatar` + ICU-гүй үед UTC+8 fallback) — parser, API, Discord, dashboard бүгд ашиглана |
@@ -101,10 +101,10 @@ D:\Claude\
 |---|---|
 | `server.js` | Prod entry: config → db → app → listen. Seed admin, `sweepStalePending()` (12 цаг тутам), graceful shutdown |
 | `app.js` | **`createApp(deps)` factory** — listen хийхгүй, тестүүд эндээс app авна. Route холболт, static serve, SPA fallback, 404/error handler |
-| `db.js` (54KB) | Бүх SQL энд. `createDb()` → миграц (17 үе шат, идемпотент) + ~50 функц |
+| `db.js` (54KB) | Бүх SQL энд. `createDb()` → миграц (**18** үе шат, идемпотент) + ~50 функц |
 | `config.js` | `api/.env` унших, `required()`/`optional()`/`num()`/`bool()` |
 | `schema.js` | zod `TransactionSchema` + `normalizeBody()` (listener-ийн alias: `direction→type`, `accountTail→accountLast4`, `subject→raw`) |
-| `classify.js` | **Ангиллын шийдвэрийн дараалал:** override → income → keyword → NULL+pending(+AI санал) |
+| `classify.js` | **Ангиллын шийдвэрийн дараалал:** override → income → keyword → NULL+pending(+AI санал). **018:** таарсан override дээр `subcategory` байвал ХОЁУЛАНГ нь буцаана; бусад БҮХ салаа `subcategory: null` (keyword ХЭЗЭЭ Ч дэд ангилал оноохгүй) |
 | `categorize.js` | `config/categories.js`-ийн wrapper |
 | `ai.js` | Anthropic API дуудлага. System prompt `cache_control: ephemeral`. Танихгүй бол ЗААВАЛ `other/low` (буруу таамаглахаас сэргийлэх). Алдаа → throw, дуудагч catch хийж системийг зогсоохгүй |
 | `fx.js` | open.er-api.com-оос USD/EUR→MNT, 1 цагийн кэш, унавал stale кэш буцаана |
@@ -240,11 +240,11 @@ D:\Claude\
 ### Transactions (`routes/transactions.js`)
 | Method | Зам | Тайлбар |
 |---|---|---|
-| POST | `/transactions` | **Ingest.** Machine (`X-API-Key`) үед `userId` ЗААВАЛ — дутуу бол 400 (owner fallback БАЙХГҮЙ). JWT үед `req.userId`. **017:** сонголттой `emailReceivedAt` (ISO 8601 UTC, `z.string().datetime()`) — байхгүй/`null` бол NULL (хуучин listener payload татгалзагдахгүй), ISO биш утга → 400 |
+| POST | `/transactions` | **Ingest.** **018:** `subcategory` нь schema-д сонголттой боловч **route нь body-гийн утгыг АШИГЛАХГҮЙ** — зөвхөн `classify.js`-ийн шийдвэр (= таарсан override-ийн дэд ангилал) бичигдэнэ. Listener дэд ангилал ХЭЗЭЭ Ч илгээхгүй. Machine (`X-API-Key`) үед `userId` ЗААВАЛ — дутуу бол 400 (owner fallback БАЙХГҮЙ). JWT үед `req.userId`. **017:** сонголттой `emailReceivedAt` (ISO 8601 UTC, `z.string().datetime()`) — байхгүй/`null` бол NULL (хуучин listener payload татгалзагдахгүй), ISO биш утга → 400 |
 | GET | `/transactions` | Шүүлт: `q, type, category, from, to, minAmount, maxAmount, status, limit, offset`. Мөр бүр `SELECT *` — **017-оос хойш `email_received_at`** (ISO UTC эсвэл `null`) хариунд орно |
 | GET | `/transactions/pending` | Ангилаагүй жагсаалт |
 | GET | `/transactions/:id` | Нэг гүйлгээний одоогийн төлөв (bot-д). Мөн `email_received_at` буцна |
-| PATCH | `/transactions/:id/category` | Баталгаажуулах/ангилал засах. Body `{category, applyToAll?, merchantPlace?, note?}`. **`learn = !!applyToAll` ГАГЦХҮҮ** — `merchantPlace`/`note` дангаараа override үүсгэхээ БОЛЬСОН (өмнө нь авто-эскалаци хийдэг байсан). `applyToAll=true` → тэр мерчантын бүх мөр + `category_overrides`; `false` → зөвхөн тухайн мөр. Хоёр зам ч `manually_edited=1`, талбар нь `COALESCE` (хоосноор дарж бичихгүй). **018 — ТӨРЛИЙН ШАЛГАЛТ:** гишүүнчлэлийн шалгалтын дараа мөрийн `row.type`-тай нийцлийг `isCategoryAllowedFor()`-оор шалгана; тохирохгүй бол **400** (ж: зарлаган мөрөнд `Орлого`). Клиентийн шүүлтэд НАЙДАХГҮЙ — шууд PATCH-ийг ЭНД хаана; татгалзсан хүсэлт override ч үүсгэхгүй |
+| PATCH | `/transactions/:id/category` | Баталгаажуулах/ангилал засах. Body `{category, applyToAll?, merchantPlace?, note?, subcategory?}`. **018 — ДЭД АНГИЛАЛ (сонголттой):** байхгүй/`null`/`''` → хөндөхгүй (одоогийн бүх клиент ийм). Өгсөн бол `subcategoryValid(category, sub)`-ээр шалгана; харьяалагдахгүй бол **400** (мөр ХӨНДӨГДӨХГҮЙ, override ч үүсэхгүй). Хүчинтэй бол мөрөнд бичигдэж, `applyToAll=true` үед **override дээр ч** хадгалагдана → дараагийн ижил мерчант ХОЁУЛАНГ нь автоматаар авна. Ангилал солиход харьяалагдахгүй болсон хуучин дэд ангилал **NULL болж цэвэрлэгдэнэ** (§8.0 гэрээ). Хариунд `subcategory` буцна. **`learn = !!applyToAll` ГАГЦХҮҮ** — `merchantPlace`/`note` дангаараа override үүсгэхээ БОЛЬСОН (өмнө нь авто-эскалаци хийдэг байсан). `applyToAll=true` → тэр мерчантын бүх мөр + `category_overrides`; `false` → зөвхөн тухайн мөр. Хоёр зам ч `manually_edited=1`, талбар нь `COALESCE` (хоосноор дарж бичихгүй). **018 — ТӨРЛИЙН ШАЛГАЛТ:** гишүүнчлэлийн шалгалтын дараа мөрийн `row.type`-тай нийцлийг `isCategoryAllowedFor()`-оор шалгана; тохирохгүй бол **400** (ж: зарлаган мөрөнд `Орлого`). Клиентийн шүүлтэд НАЙДАХГҮЙ — шууд PATCH-ийг ЭНД хаана; татгалзсан хүсэлт override ч үүсгэхгүй |
 | PATCH | `/transactions/:id/note` | Тэмдэглэл/газрын нэр — **ангилал хөндөхгүй, override үүсгэхгүй**. Body `{note?, merchantPlace?}`: **body-д БАЙГАА талбарыг Л шинэчилнэ**; тодорхой хоосон string → `NULL` (утга устгах боломж); хоёулаа байхгүй → 400. Хариу `{status:'ok', id, note, merchantPlace}` |
 | PATCH | `/transactions/:id/exclusion` | **Төсвөөс хасах/буцаах.** Body `{excluded: boolean}` (бүхлээр нь) **ЭСВЭЛ `{excludedAmount: number}`** (016 — хэсэгчилсэн, `[0, amount]`). Хоёулаа байхгүй / буруу төрөл → 400; `excludedAmount > amount` → **400**. Хасалт байхад `manually_edited=1`. Хариу `{excluded (=БҮРЭН хасагдсан эсэх), excludedAmount, netAmount, manuallyEdited}`. ⚠️ ЗӨВХӨН төсөв/ангилал/шинжилгээнд нөлөөлнө — **үлдэгдэлд ХЭЗЭЭ Ч нөлөөлөхгүй**. Өрийн бичлэгтэй холбоотой гүйлгээний хасалтыг гараар **өөрчлөх** гэвэл **409** (эхлээд дэвтрээс салгана; утга өөрчлөгдөхгүй no-op дуудалт зөвшөөрөгдөнө) |
 
@@ -259,7 +259,7 @@ D:\Claude\
 | GET | `/fx-rates` | Амьд USD/EUR→MNT (провайдер унавал 502) |
 | GET | `/categories` | 10 ангилал — **ШҮҮГДЭХГҮЙ** (бүтэн жагсаалт). Төрлөөр шүүх нь picker-ийн ажил (`isCategoryAllowedFor`), учир нь энэ жагсаалтыг App нэг л удаа татаж, мөр бүрд дахин ашигладаг |
 | POST | `/ai-categorize` | AI санал (дотоод). **018:** prompt-ын нэр дэвшигчээс зөвхөн орлогын ангилал ХАСАГДСАН — AI салаа нь зөвхөн зарлагын мөрөнд хүрдэг тул "Орлого" санал ҮРГЭЛЖ буруу байсан |
-| GET/POST | `/overrides` | Learned override жагсаах/нэмэх. **018 (ХЭСЭГЧИЛСЭН шалгалт):** override нь тодорхой гүйлгээнд БИШ, мерчантын хэв шинжид хамаардаг тул `type` тодорхойлох БОЛОМЖГҮЙ — таамаглахгүй. Зөвхөн эргэлзээгүйг хаана: **зөвхөн орлогын ангилал → 400** (орлого автоматаар ангилагддаг тул илүүц, зарлагад буруу). Зарлагын ангилал нь override-ийн ХЭВИЙН хэрэглээ — хөндөөгүй |
+| GET/POST | `/overrides` | Learned override жагсаах/нэмэх. **018:** мөр бүр `subcategory` (nullable) агуулна — `PATCH /:id/category`-ийн `applyToAll` замаар бичигдэнэ; `classify.js` ingest дээр ХОЁУЛАНГ нь хэрэглэнэ. **018 (ХЭСЭГЧИЛСЭН шалгалт):** override нь тодорхой гүйлгээнд БИШ, мерчантын хэв шинжид хамаардаг тул `type` тодорхойлох БОЛОМЖГҮЙ — таамаглахгүй. Зөвхөн эргэлзээгүйг хаана: **зөвхөн орлогын ангилал → 400** (орлого автоматаар ангилагддаг тул илүүц, зарлагад буруу). Зарлагын ангилал нь override-ийн ХЭВИЙН хэрэглээ — хөндөөгүй |
 
 ### Budget (`routes/budget.js`)
 `GET/PUT /settings` · `GET /budget-status?cycle=current` · `GET/PUT /budget-allocations` ·
@@ -313,8 +313,8 @@ Balance = валют тус бүрээр тэмдэгт нийлбэр — **bac
 
 | Хүснэгт | Гол багана |
 |---|---|
-| `transactions` | `user_id, amount, currency, txn_date, type, category, status, description, merchant_place, is_pos, note, ai_suggested_category, ai_confidence, manually_edited, account_balance, **email_received_at** (TEXT NULL — банкны мэдэгдэл ирсэн цаг, ISO 8601 **UTC**; имэйлийн `Date:` header, 017), **excluded_amount** (REAL NOT NULL DEFAULT 0, `CHECK ≥0`), **excluded_from_budget** (=БҮРЭН хасагдсан эсэх, `excluded_amount ≥ amount` үед 1 — бичилт бүр дээр дахин тооцоологдоно), message_id (UNIQUE)` |
-| `category_overrides` | `user_id, merchant_pattern, category, friendly_name, default_note` — `UNIQUE(user_id, merchant_pattern)` |
+| `transactions` | `user_id, amount, currency, txn_date, type, category, **subcategory** (TEXT NULL — ангилал доторх нарийвчлал, МОНГОЛ label; 018, backfill БАЙХГҮЙ), status, description, merchant_place, is_pos, note, ai_suggested_category, ai_confidence, manually_edited, account_balance, **email_received_at** (TEXT NULL — банкны мэдэгдэл ирсэн цаг, ISO 8601 **UTC**; имэйлийн `Date:` header, 017), **excluded_amount** (REAL NOT NULL DEFAULT 0, `CHECK ≥0`), **excluded_from_budget** (=БҮРЭН хасагдсан эсэх, `excluded_amount ≥ amount` үед 1 — бичилт бүр дээр дахин тооцоологдоно), message_id (UNIQUE)` |
+| `category_overrides` | `user_id, merchant_pattern, category, **subcategory** (TEXT NULL — 018; сурсан дэд ангилал, ingest дээр хэрэглэгдэнэ), friendly_name, default_note` — `UNIQUE(user_id, merchant_pattern)` |
 | `users` | `id, email UNIQUE, password_hash, role, google_sub, picture` |
 | `user_settings` | `user_id PK, data (JSON)` |
 | `personal_events` | `id, user_id, title, date, amount_mnt` |
@@ -326,7 +326,7 @@ Balance = валют тус бүрээр тэмдэгт нийлбэр — **bac
 | `manual_ledger_entries` | `user_id, entry_date, type, amount, currency, amount_eur, exchange_rate, note` |
 | `debt_ledger` | `user_id, counterparty, direction ('i_lent'\|'i_borrowed'), amount (CHECK>0), currency ('MNT'\|'EUR'), entry_date, note, status ('open'\|'settled'), linked_transaction_id (→transactions, ON DELETE SET NULL), settled_transaction_id (мөн адил), **exclusion_share** (REAL NULL — холбосон гүйлгээнээс эзлэх хэсэг; NULL = `amount`), created_at, settled_at` |
 
-**Миграцын түүх (17):** 001–004 үндсэн + dashboard/AI/note · **005** auth+multi-tenant
+**Миграцын түүх (18):** 001–004 үндсэн + dashboard/AI/note · **005** auth+multi-tenant
 (`user_id` бүх хүснэгтэд, `category_overrides`-г table-rebuild хийсэн) · 006 settings+events ·
 007 google_sub/picture + google_tokens · 008 budget_allocations · 009 Gmail multi-tenant
 баганууд + **token encryption backfill** · 010 Telegram хүснэгтүүд · 011 `gmail_oauth_client`
@@ -347,7 +347,16 @@ DEFAULT NULL, **backfill ХИЙХГҮЙ** — 012-ын `account_balance`-тай 
 Gmail имэйлийн `Date:` header (`simpleParser` → `parsed.date`). ISO 8601 **UTC**-ээр
 хадгална; дэлгэц/bot дээр л УБ (Asia/Ulaanbaatar) болгож хөрвүүлнэ.
 ⚠️ `txn_date` **ХӨНДӨГДӨӨГҮЙ** — огноо (YYYY-MM-DD) хэвээрээ (budgetCycle.js /
-balanceHistory.js / `/balance-history` бүгд түүнд тулгуурладаг).
+balanceHistory.js / `/balance-history` бүгд түүнд тулгуурладаг). ·
+**018** ДЭД АНГИЛАЛ: `transactions.subcategory` БА `category_overrides.subcategory`
+(хоёул `TEXT`, nullable, DEFAULT NULL, **backfill ХИЙХГҮЙ** — 012/017-тэй ижил
+философи, одоо байгаа БҮХ мөр NULL хэвээр). Хадгалагдах утга нь **МОНГОЛ LABEL**
+(ангиллынхтай ЯГ ИЖИЛ гэрээ — id ХЭЗЭЭ Ч DB-д орохгүй).
+⚠️ **ДУГААРЛАЛТЫН ТӨӨРӨГДӨЛ:** §15-д "016/017/**018**/**019**" гэж бичигдсэн
+зарим тэмдэглэгээ нь **ФИЧЕРИЙН БАГЦЫН шошго** — applicability (§8.1) ба тогтмол id
+(§14) хоёр нь миграц ОГТ НЭМЭЭГҮЙ. Тиймээс миграцын гинж 017-оос шууд **018**
+(дэд ангилал) руу үргэлжилнэ. Дараагийн миграцын дугаарыг ҮРГЭЛЖ `api/db.js`-ийн
+`migrate()`-ээс уншина, баримтаас БИШ.
 
 PRAGMA: `journal_mode=WAL`, `synchronous=NORMAL`, `foreign_keys=ON`.
 WAL нь **олон процесс** (api + listener + 2 bot) нэг файлыг зэрэг ашиглах боломж өгдөг.
@@ -397,9 +406,16 @@ WAL нь **олон процесс** (api + listener + 2 bot) нэг файлы�
 
 ## 8. Ангиллын систем
 
-**10 ангилал** (`config/categories.js`, emoji + hex-тэй):
-Гадуур хооллолт 🍽️ · Хүнсний зүйл 🛒 · Тээвэр 🚗 · Орлого 💰 · Шилжүүлэг & гэр бүл 💸 ·
-Захиалга & сервис 📱 · Боловсрол 📚 · Чөлөөт цаг / зугаа цэнгэл 🎬 · Хувцас / гоо сайхан 👕 · Бусад 📦
+**12 ангилал** (`config/categories.js`, тогтмол id + emoji + hex-тэй):
+Гадуур хооллолт 🍽️ `dining` · Хүнсний зүйл 🛒 `grocery` · Тээвэр 🚗 `transport` ·
+Орлого 💰 `income` · Шилжүүлэг & гэр бүл 💸 `transfer` · Захиалга & сервис 📱 `subs` ·
+Боловсрол 📚 `edu` · Чөлөөт цаг / зугаа цэнгэл 🎬 `leisure` · Хувцас / гоо сайхан 👕 `apparel` ·
+Бусад 📦 `other` · **Эрүүл мэнд 🏥 `health` (018)** · **Орон сууц & коммунал 🏠 `housing` (018)**
+
+⚠️ Сүүлийн хоёр нь **018-д ТӨГСГӨЛД нэмэгдсэн** (дунд нь БИШ), шинэ id-тай — хуучин
+10-ын нэр/emoji/hex/эрэмбэ **юу ч өөрчлөгдөөгүй**. Хоёул **ЗӨВХӨН ЗАРЛАГА**
+(`CATEGORY_APPLICABILITY`-д тодорхой бичигдсэн — fail-open дүрмээр орлогод "мултарч"
+гарахгүй). Эдгээр нэмэгдсэнээр «Эрүүл мэндийн ангилал алга» гэсэн дутагдал хаагдсан.
 
 **Дүрмүүд:**
 - Keyword дүрэм 7 ангилалд (Орлого/Шилжүүлэг/Бусад нь тусгай логикоор).
@@ -409,6 +425,48 @@ WAL нь **олон процесс** (api + listener + 2 bot) нэг файлы�
 - `BOM` төгсгөлтэй = POS гүйлгээ (`detectIsPos`) → bot нь "Газрын нэр" асууна, бусад
   тохиолдолд "Шалтгаан" асууна.
 - **"Бусад"-ыг автоматаар оноохгүй** — зөвхөн хэрэглэгч сонгоно (эсвэл 3 хоногийн sweep).
+- **Шинэ 2 ангилалд keyword дүрэм БИЧИГДЭЭГҮЙ** (зориуд) — Голомтын таслагдсан
+  мерчант кодоос эмнэлэг/түрээсийг таамаглах нь эрсдэлтэй. Learned override-оор
+  л ангилагдана (§14-ийн STOREBOM зарчимтай ижил).
+
+### 8.0 ДЭД АНГИЛАЛ (subcategory) — 018
+
+Ангилал доторх нарийвчлал: `Эрүүл мэнд → Шүд`, `Орон сууц & коммунал → Цахилгаан`.
+Таксономи нь **өгөгдөл** хэлбэрээр `config/categories.js`-ийн `SUBCATEGORIES`-д:
+эцэг ангиллын **тогтмол id** → эрэмбэлэгдсэн `{ id, label }` жагсаалт.
+
+| Эцэг | Дэд ангиллууд (id → нэр) |
+|---|---|
+| `health` | `insurance` Даатгал · `clinic` Эмнэлэг · `pharmacy` Эм/эмийн сан · `dental` Шүд · `diagnostic` Оношилгоо |
+| `housing` | `rent` Түрээс/зээл · `electric` Цахилгаан · `heating` Дулаан · `water` Ус |
+| `dining` | `restaurant` Ресторан · `cafe` Кафе/кофе · `delivery` Хүргэлт |
+| `grocery` | `supermarket` Супермаркет · `store` Дэлгүүр · `market` Зах |
+| `transport` | `fuel` Түлш · `taxi` Такси · `transit` Нийтийн тээвэр · `repair` Засвар |
+| `income` | `salary` Цалин · `loan` Зээл · `sidejob` Side job · `gift` Бэлэг/Буцаалт |
+| `transfer` | `family` Гэр бүл · `friend` Найз · `savings` Хадгаламж руу |
+| `subs` | `streaming` Streaming · `saas` Апп/SaaS · `membership` Гишүүнчлэл |
+| `other` · `apparel` · `edu` · `leisure` | **(хоосон)** — дэд ангилалгүй нь ХЭВИЙН төлөв |
+
+**Дүрмүүд:**
+- ⚠️ **ДЭД АНГИЛАЛ ХЭЗЭЭ Ч АВТОМАТААР ОНООГДОХГҮЙ.** `matchByKeywords` дэд ангилал
+  мэдэхгүй бөгөөд мэдэх ч ЁСГҮЙ. Гүйлгээнд дэд ангилал орох ЯГ ХОЁР зам:
+  **(1)** таарсан learned override дээр бичигдсэн байх (`classify.js`), **(2)** хэрэглэгч
+  `PATCH /:id/category`-д тодорхой илгээх. Keyword салаа ба орлогын салаа хоёул
+  ҮРГЭЛЖ `subcategory: null`.
+- **Хадгалалт:** DB-д **МОНГОЛ label** (ангиллынхтай ижил гэрээ). `id` нь зөвхөн
+  config-д (болон хожмын bot payload-д) амьдарна.
+- ⚠️ **ГЭРЭЭ: `subcategory` ҮРГЭЛЖ өөрийн `category`-д харьяалагдана.** Ангилал
+  өөрчлөгдөхөд хуучин дэд ангилал хүчингүй болвол **NULL болж цэвэрлэгдэнэ**
+  (`db.js`-ийн `_resolveSub`); хүчинтэй хэвээр бол хадгалагдана. Тиймээс
+  «Тээвэр + Шүд» гэх ГАЖ хос үүсэх боломжгүй.
+- **Валидатор `subcategoryValid()` нь FAIL-CLOSED** (applicability-гээс ЯЛГААТАЙ):
+  танихгүй ангилал / дэд ангилалгүй ангилал / харьяалагдахгүй нэр → `false`.
+  Fail-open байсан бол дурын утга DB-д орж гэрээ алдагдана.
+- **Одоогийн байдал (Prompt 2):** дэд ангилал нь өгөгдөл ба API-аар л боломжтой —
+  **клиентийн UI БАЙХГҮЙ** (bot-ын хоёр шатат урсгал, dashboard-ийн dropdown,
+  аналитикийн drill-down бүгд **Prompt 3**). Тиймээс одоогоор БҮХ мөр NULL хэвээр.
+- Аналитикийн нэгтгэл бүр `NULL` дэд ангиллыг ТЭВЧИНЭ (`by-category` нь урьдын
+  адил ЗӨВХӨН `category`-гаар бүлэглэдэг — энэ фазад өөрчлөгдөөгүй).
 
 ### 8.1 Ангиллын ХАМААРАЛ (applicability) — аль ангилал аль төрлийн гүйлгээнд
 
@@ -420,7 +478,7 @@ WAL нь **олон процесс** (api + listener + 2 bot) нэг файлы�
 | `Орлого` | **зөвхөн `income`** | Зарлагын мөрөнд утгагүй — энэ нь засварласан гол алдаа |
 | `Шилжүүлэг & гэр бүл` | **`income` + `expense`** | Гэр бүлийн шилжүүлэг ХОЁР ТИЙШ явна (ээжид өгөх / ээжээс авах) |
 | `Бусад` | **`income` + `expense`** | Хэрэглэгчийн ГАРААР сонгох гарц — автоматаар хэзээ ч оногдохгүй |
-| үлдсэн 7 | зөвхөн `expense` | Хоол, тээвэр, хувцас г.м зөвхөн зарлага |
+| үлдсэн **9** | зөвхөн `expense` | Хоол, тээвэр, хувцас, **эрүүл мэнд, орон сууц** г.м зөвхөн зарлага |
 
 **Ганц предикат:** `isCategoryAllowedFor(category, type)` — гурван клиентийн picker
 БА API-ийн баталгаажуулалт бүгд ЭНЭ функцээр шийднэ (дүрэм давхардуулахгүй).
@@ -548,22 +606,22 @@ Discord / Telegram / Website гурвуулан **ижил чадвартай**.
 
 ---
 
-## 12. Тест (нийт **309**, бүгд `node --test`)
+## 12. Тест (нийт **339**, бүгд `node --test`)
 
 ⚠️ Root дээрх `npm test` (= `node --test`) нь **recursive** тул доорх БҮХ багцыг
-(api/telegram/discord/dashboard оруулаад) нэг дор ажиллуулж **309** гэж мэдээлдэг.
+(api/telegram/discord/dashboard оруулаад) нэг дор ажиллуулж **339** гэж мэдээлдэг.
 Багц бүрийг тусад нь ажиллуулах командыг баруун баганад бичив.
 ⚠️ Git Bash дээр `node --test test/` нь заримдаа "MODULE_NOT_FOUND" өгдөг —
 `node --test test/*.test.js` гэж glob-оор бичвэл найдвартай.
 
 | Багц | Тоо | Ажиллуулах |
 |---|---|---|
-| API | **179** (api 12, auto-classify 3, balance-history 18, balance 6, budget-status 12, budget 8, **category-applicability 11**, dashboard 17, **debt-ledger 19**, gmail-auth 12, google-auth 11, google-provider 3, manual-savings 16, **partial-exclusion 12**, **email-received-at 6**, telegram 6, token-crypto 7) | `cd api && npm test` |
-| Дундын (`test/`) | **59** (golomt 12, categorize 10, shared 4, transactionActions 7, **emailReceivedAt 5**, **categoryApplicability 9**, **categoryStableId 6**, **categoryButtonId 6**) | `node --test test/*.test.js` |
+| API | **197** (api 12, auto-classify 3, balance-history 18, balance 6, budget-status 12, budget 8, **category-applicability 11**, dashboard 17, **debt-ledger 19**, gmail-auth 12, google-auth 11, google-provider 3, manual-savings 16, **partial-exclusion 12**, **email-received-at 6**, **subcategory 18**, telegram 6, token-crypto 7) | `cd api && npm test` |
+| Дундын (`test/`) | **70** (golomt 12, categorize 10, shared 4, transactionActions 7, **emailReceivedAt 5**, **categoryApplicability 9**, **categoryStableId 6**, **categoryButtonId 6**, **subcategories 11**) | `node --test test/*.test.js` |
 | Listener модуль | **12** (accounts 4, manager 4, balanceAlert 4) | `node --test src/*.test.js` |
 | Telegram | **18** (db 10, isolation 2, **category-filter 6**) | `cd telegram && npm test` |
 | Dashboard цэвэр логик | **26** (budget 12, **debt 14**) | `node --test dashboard/src/lib/*.test.js` |
-| Discord | **15** (categories 6, **notify 3**, **category-filter 6**) | `cd discord && npm test` |
+| Discord | **16** (categories 6, **notify 3**, **category-filter 7**) | `cd discord && npm test` |
 
 Загвар: API тестүүд жинхэнэ `createApp()`-г `:memory:` DB дээр ачаалж, HTTP түвшинд шалгана
 (mock биш). Цэвэр логик (budgetCycle, balanceHistory, budget.js, manager.js,
@@ -619,6 +677,27 @@ id↔ангилал round-trip · `byId` нь **хуучин индекс ('0'�
 callback_data ≤64 БАЙТ · **хуучин индекс-payload `c|123|4|1` → `categoryById()` = null**
 (Discord `c`/`m`, Telegram `c`/`ec` бүгдэд) · хоёр bot ИЖИЛ id орон зайг ашиглана.
 
+`subcategories.test.js` + `api/test/subcategory.test.js` (018) ★: шинэ 2 ангилал
+ТӨГСГӨЛД нэмэгдсэн, хуучин 10-ын эрэмбэ хөдлөөгүй · шинэ 2 нь **ЗӨВХӨН ЗАРЛАГА**
+(`isCategoryAllowedFor` БА бодит picker гаралт хоёуланд — орлогын жагсаалт 3 хэвээр) ·
+таксономийн seed бүрэн таарна · **дэд ангилалгүй ангилал → ХООСОН массив** (танихгүй
+эцэг ч мөн адил, throw БИШ) · `subcategoryValid` **FAIL-CLOSED** (өөр эцгийн дэд
+ангилал / дэд ангилалгүй ангилал / хоосон / label-ийн оронд id → бүгд `false`) ·
+эцэг өөр бол ижил id зэрэгцэн орших боломжтой · `subcategoriesFor` ХУУЛБАР буцаана.
+**API талд:** ★ **файл DB дээр миграц идемпотент (2 удаа reload) + backfill БАЙХГҮЙ**
+(хуучин мөр ба override хоёул NULL хэвээр) · ingest дэд ангилалгүй → NULL ·
+★ **keyword-аар ангилагдсан гүйлгээ дэд ангилал ХЭЗЭЭ Ч авахгүй** (`cafe` → Гадуур
+хооллолт, subcategory NULL) · орлогын авто-ангилал ч мөн адил · PATCH хүчинтэй →
+хадгална · ★ **харьяалагдахгүй → 400, мөр ХӨНДӨГДӨХГҮЙ** (`status`/`manually_edited`
+ч хэвээр) · дэд ангилалгүй ангилалд → 400 · татгалзсан хүсэлт **override үүсгэхгүй** ·
+★ **applyToAll → override-д бичигдэж, ДАРААГИЙН ижил мерчант ХОЁУЛАНГ нь авна** ·
+хуучин (дэд ангилалгүй) override → NULL, зан төлөв хэвээр · ★ **ангилал солиход
+өнчирсөн дэд ангилал ЦЭВЭРЛЭГДЭНЭ**, ижил ангилалд хадгалагдана · `manually_edited=1`
+мөр sweep-д хөндөгдөхгүй · cross-user PATCH → 404 · `summary`/`monthly`/`by-category`
+бүгд NULL-тэй ажиллана.
+`discord/test/category-filter.test.js`-д нэмэгдсэн ★: **12 ангилал дээр ч мессежийн
+эгнээ ≤5, товч ≤25** (зарлага = 3 ангиллын эгнээ + 1 талбарын эгнээ = 4; нөөц 1 эгнээ).
+
 `scripts/category-id.verify.mjs` (019, ops verify — `npm test`-д ОРООГҮЙ): жинхэнэ
 `createApp()` + `:memory:` DB дээр **pending → БОДИТ товч → payload задаргаа →
 `PATCH /:id/category` → DB-д бичигдсэн утга** гэсэн бүтэн гинжийг шалгана. Гол баталгаа:
@@ -662,6 +741,13 @@ PATCH огт дуудагдахгүй → мөр `pending_review` хэвээр, 
     id өгнө (хуучныг дахин ашиглахгүй), id нь богино ASCII ба **цэвэр тоо БИШ**
     (энэ нь хуучин индекс-payload-ыг ялгах чадварын үндэс). DB-д хадгалагдах утга нь
     ӨМНӨХ ЧИГЭЭР ангиллын **НЭР** — id нь зөвхөн payload-ын кодлол.
+13. **★ Дэд ангилал АВТОМАТААР оногдохгүй (018).** Шинэ ангилагч/дүрэм/AI салаа
+    нэмэхдээ `subcategory`-г ХЭЗЭЭ Ч таамаглаж бүү бич — зөвхөн (1) таарсан learned
+    override, (2) хэрэглэгчийн тодорхой PATCH хоёр л эх сурвалж. `matchByKeywords`-д
+    дэд ангиллын логик оруулахыг **ХОРИГЛОНО**. Дэд ангилал бичих бүх зам
+    `subcategoryValid()`-ээр (★ **fail-closed**) шалгагдана, тэр нь `config/
+    categories.js`-д. Мөрийн `subcategory` нь ҮРГЭЛЖ өөрийн `category`-д
+    харьяалагдана: ангилал өөрчлөгдөхөд өнчирсөн утга NULL болно (§8.0).
 
 ---
 
@@ -693,7 +779,42 @@ PATCH огт дуудагдахгүй → мөр `pending_review` хэвээр, 
 ## 15. Одоогийн төлөв (2026-08-12)
 
 - Серверт 4 pm2 процесс online, домейн амьд.
-- **★ СҮҮЛИЙН АЖИЛ — BOT-ЫН PAYLOAD ТОГТМОЛ ID БОЛОВ (019, ✅ СЕРВЕРТ ГАРСАН
+- **★ СҮҮЛИЙН АЖИЛ — ДЭД АНГИЛЛЫН СУУРЬ + 2 ШИНЭ АНГИЛАЛ (миграц **018**,
+  ⏸ DEPLOY ХИЙГЭЭГҮЙ — Tuguldur-ийн зөвшөөрөл хүлээж байна):**
+  Гурван prompt-ын **2 дахь** нь. Энэ фазад **КЛИЕНТИЙН UI НЭМЭЭГҮЙ** — bot-ын хоёр
+  шатат урсгал, dashboard-ийн dropdown, аналитикийн drill-down бүгд **Prompt 3**.
+  1. **2 шинэ ангилал** (`CATEGORIES`-ийн ТӨГСГӨЛД, шинэ id): **Эрүүл мэнд** 🏥
+     `health` `#C05746` · **Орон сууц & коммунал** 🏠 `housing` `#5B7B9A`. Хоёул
+     **зөвхөн зарлага** (`CATEGORY_APPLICABILITY`). Бүх surface нь
+     `config/categories.js`-ээс рендерлэдэг тул эдгээр **шууд сонгогдох болно** →
+     «Эрүүл мэндийн ангилал алга» дутагдал ХААГДЛАА.
+  2. **Дэд ангиллын таксономи** (`SUBCATEGORIES`, 8 эцэгт 30 дэд ангилал; §8.0) +
+     `subcategoriesFor()` / `subcategoryValid()` (★ fail-closed) / `subcategoryLabel()`.
+     `other`/`apparel`/`edu`/`leisure` нь ХООСОН (хэвийн төлөв).
+  3. **Миграц 018:** `transactions.subcategory` + `category_overrides.subcategory`
+     (хоёул `TEXT` NULL, `hasColumn()` хамгаалалттай, **backfill БАЙХГҮЙ**).
+     ⚠️ Миграцын гинж 017-д зогссон байсныг ЖИНХЭНЭ кодоос уншиж баталсан —
+     §15-ийн "018/019" шошго нь ФИЧЕРИЙН БАГЦ, миграцын дугаар БИШ (§6).
+  4. **Backend plumbing:** `schema.js` (сонголттой `subcategory`) · `PATCH
+     /:id/category` (сонголттой, харьяаллыг шалгана → 400, `applyToAll` үед
+     override-д ч бичнэ) · `classify.js` (таарсан override → ХОЁУЛАН). Дэд ангилал
+     **keyword-оор ХЭЗЭЭ Ч оногдохгүй**.
+  ⚠️ **ГЭРЭЭ:** DB-д МОНГОЛ label хадгална (id БИШ); `subcategory` нь ҮРГЭЛЖ өөрийн
+  `category`-д харьяалагдана — ангилал солиход өнчирсөн утга NULL болж цэвэрлэгдэнэ.
+  **Одоо байгаа БҮХ мөрийн `subcategory` = NULL**, нэг ч ангиллын утга
+  ӨӨРЧЛӨГДӨӨГҮЙ, `manually_edited=1` мөр хөндөгдөөгүй.
+  Шинэ тест **30** (дундын `subcategories` 11, API `subcategory` 18, Discord +1) —
+  нийт **339** ногоон (өмнөх 309).
+  ⚠️ **DEPLOY нь Prompt 1-ээс ДҮҮРЭН:** миграц бий → **DB backup ЗААВАЛ**;
+  `bank-api` reload; хоёр bot reload (2 шинэ товч); **dashboard rebuild + `dist` хуулах**
+  (config нь build-д bundled — эс бөгөөс шинэ 2 ангилал UI-д ГАРАХГҮЙ).
+  **Listener-тэй ХАМТ гаргах ШААРДЛАГАГҮЙ** — `src/` дор нэг ч файл өөрчлөгдөөгүй,
+  listener дэд ангилал илгээдэггүй, `subcategory` нь schema-д сонголттой тул хуучин
+  payload 400 болохгүй (нэг талыг түрүүлж гаргасан ч эвдрэхгүй).
+  ✅ Discord-ийн товчны байрлал 12 ангилал дээр ч багтана: зарлага 11 товч →
+  3 эгнээ + талбарын 1 эгнээ = **4 ≤ 5** (нийт 12 ≤ 25). Нөөц 1 эгнээ — ангилал
+  ~20 хүрэхэд хуудаслалт хэрэгтэй болно (тестээр түгжсэн).
+- **★ Өмнөх ажил — BOT-ЫН PAYLOAD ТОГТМОЛ ID БОЛОВ (019, ✅ СЕРВЕРТ ГАРСАН
   2026-08-12, commit `a2c6c46` — ⏳ АМЬД ТАПЫН ШАЛГАЛТ ХҮЛЭЭГДЭЖ БАЙНА, доороос үз).
   МИГРАЦ БАЙХГҮЙ — schema огт хөндөөгүй, DB-д бичигдэх утга ӨӨРЧЛӨГДӨӨГҮЙ:** Discord/Telegram нь ангиллыг товчны payload
   дотор `CATEGORIES` массив дахь **ИНДЕКСЭЭР** дамжуулдаг байсныг **ТОГТМОЛ

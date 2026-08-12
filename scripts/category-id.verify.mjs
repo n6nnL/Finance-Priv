@@ -75,7 +75,7 @@ try {
     // notify.js-ийн ЖИНХЭНЭ builder (мөрийн type-аар шүүгдсэн)
     const rows = buildButtonRows(id, row.is_pos === 1, row.type);
     const buttons = rows.flatMap((r) => r.components.map((c) => c.toJSON()));
-    assert.strictEqual(buttons.length, 9, 'зарлагад 9 товч (Орлого-гүй)');
+    assert.strictEqual(buttons.length, 11, 'зарлагад 11 товч (018: 12 − Орлого)');
 
     // "Тээвэр" товчийг дарсан гэж үзье — ЗӨВХӨН customId-аар дамжуулна
     const btn = buttons.find((b) => b.label === 'Тээвэр');
@@ -137,7 +137,7 @@ try {
     const row = (await get(id)).data;
     const kb = buildCategoryKeyboard(id, row.is_pos === 1, 'c', row.type);
     const btns = kb.reply_markup.inline_keyboard.flat();
-    assert.strictEqual(btns.length, 9);
+    assert.strictEqual(btns.length, 11);
 
     const btn = btns.find((b) => b.text === 'Хувцас / гоо сайхан');
     assert.ok(Buffer.byteLength(btn.callback_data, 'utf8') <= 64,
@@ -229,7 +229,7 @@ try {
       assert.strictEqual(after.category, category, `DB-д "${category}" бичигдэх ёстой`);
       checked++;
     }
-    ok(`${checked}/9 зарлагын ангилал бүрд: товч → DB бичилт ЯГ таарлаа`);
+    ok(`${checked}/11 зарлагын ангилал бүрд: товч → DB бичилт ЯГ таарлаа`);
   }
 
   console.log(`\n🎉 Бүх шалгалт PASS (${pass} баталгаа)\n`);

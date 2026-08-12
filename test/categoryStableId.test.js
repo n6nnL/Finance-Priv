@@ -20,7 +20,7 @@ const ORIGINAL_ORDER = [...CATEGORIES];
 
 test('ангилал бүр ТОГТМОЛ id-тай, id нь ДАВХАРДААГҮЙ', () => {
   const ids = ORIGINAL_ORDER.map((c) => CATEGORY_META[c]?.id);
-  assert.equal(ids.length, 10);
+  assert.equal(ids.length, 12);
   for (const id of ids) assert.equal(typeof id, 'string');
   assert.equal(new Set(ids).size, ids.length, 'id давхардсан байна');
 });
@@ -95,13 +95,13 @@ test('★ CATEGORIES-ийн ДАРААЛЛЫГ ХОЛИХОД id бүр ИЖИЛ
 
 test('listCategoriesWithIdFor: хос бүр зөв, дараалал CATEGORIES-ийнх', () => {
   const exp = listCategoriesWithIdFor('expense');
-  assert.equal(exp.length, 9);
+  assert.equal(exp.length, 11);
   assert.ok(!exp.some((o) => o.category === 'Орлого'));
   for (const { category, id } of exp) assert.equal(byId(id), category);
 
   const inc = listCategoriesWithIdFor('income');
   assert.deepEqual(inc.map((o) => o.id), ['income', 'transfer', 'other']);
 
-  // type-гүй (хуучин дуудлага) → бүх 10 (fail-open)
-  assert.equal(listCategoriesWithIdFor().length, 10);
+  // type-гүй (хуучин дуудлага) → бүх 12 (fail-open)
+  assert.equal(listCategoriesWithIdFor().length, 12);
 });
