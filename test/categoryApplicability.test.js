@@ -10,7 +10,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   CATEGORIES, CATEGORY_APPLICABILITY, isCategoryAllowedFor,
-  categoriesFor, listCategoriesWithIndexFor, INCOME_CATEGORY,
+  categoriesFor, listCategoriesWithIdFor, byId, INCOME_CATEGORY,
 } from '../config/categories.js';
 
 test('"Орлого" — ЗӨВХӨН орлогын мөрөнд (энэ фазын гол алдаа)', () => {
@@ -72,16 +72,18 @@ test('categoriesFor: дараалал CATEGORIES-ийнхтэй ижил хэв�
   assert.deepEqual(exp, expected);
 });
 
-test('listCategoriesWithIndexFor: index нь БҮТЭН массив дахь ЖИНХЭНЭ байрлал', () => {
-  // ★ Bot-ийн индекс кодлолын үндэс — шүүлтийн дараах байрлал БИШ.
-  const inc = listCategoriesWithIndexFor('income');
+test('listCategoriesWithIdFor: шүүсэн ангилал бүр ТОГТМОЛ id-тайгаа хамт ирнэ', () => {
+  // ★ Bot-ийн кодлолын үндэс — массив дахь байрлал ХААНА Ч оролцохгүй.
+  const inc = listCategoriesWithIdFor('income');
   assert.deepEqual(inc, [
-    { category: 'Орлого', index: 3 },
-    { category: 'Шилжүүлэг & гэр бүл', index: 4 },
-    { category: 'Бусад', index: 9 },
+    { category: 'Орлого', id: 'income' },
+    { category: 'Шилжүүлэг & гэр бүл', id: 'transfer' },
+    { category: 'Бусад', id: 'other' },
   ]);
-  // Бүх хосын index → CATEGORIES дээр буцаагаад ижил нэр өгөх ёстой
-  for (const { category, index } of listCategoriesWithIndexFor('expense')) {
-    assert.equal(CATEGORIES[index], category);
+  // Дараалал нь categoriesFor()-тэй ижил, id бүр буцаагаад ижил нэр өгнө
+  const exp = listCategoriesWithIdFor('expense');
+  assert.deepEqual(exp.map((o) => o.category), categoriesFor('expense'));
+  for (const { category, id } of exp) {
+    assert.equal(byId(id), category);
   }
 });

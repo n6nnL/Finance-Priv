@@ -5,7 +5,7 @@
 import { Markup } from 'telegraf';
 import { encodeButtonId, encodeEditButtonId, encodeFieldButtonId } from './categories.js';
 import { isPendingTxn, detailFieldFor } from '../config/transactionActions.js';
-import { listCategoriesWithIndexFor } from '../config/categories.js';
+import { listCategoriesWithIdFor } from '../config/categories.js';
 
 export function fmtMoney(n) {
   if (n == null) return '-';
@@ -44,11 +44,10 @@ export function buildText(tx) {
  * kind='c' → pending баталгаажуулалт; kind='ec' → classified мөрийн засвар
  * (stale-check-гүй урсгал — bot.js-ийн handler ялгаж боловсруулна).
  *
- * ⚠️ ИНДЕКСИЙН УРХИ (discord/notify.js-тэй ижил): callback_data дотор ангиллыг
- * БҮТЭН CATEGORIES массив дахь индексээр дамжуулж, categoryByIndex()-ээр
- * задална. Шүүсэн массивын ШИНЭ индексийг кодловол товч бүр БУРУУ ангилал
- * илгээнэ. Тиймээс listCategoriesWithIndexFor()-ийн `index`-ийг кодолж,
- * `pos`-ийг зөвхөн эгнээ таслахад ашиглана.
+ * ★ callback_data дотор ангиллын ТОГТМОЛ id кодлогдоно (массив дахь байрлал
+ * БИШ — discord/notify.js-тэй ижил зарчим). Тиймээс CATEGORIES-ийн дараалал
+ * өөрчлөгдөх/дунд нь шинэ ангилал орох нь илгээгдсэн товчнуудад нөлөөлөхгүй.
+ * Давталтын байрлал (`pos`) нь зөвхөн эгнээ таслах зорилготой.
  *
  * @param {number} txnId
  * @param {boolean} isPos
@@ -56,14 +55,14 @@ export function buildText(tx) {
  * @param {'income'|'expense'|null} [type] гүйлгээний төрөл (шүүлтэд)
  */
 export function buildCategoryKeyboard(txnId, isPos, kind = 'c', type) {
-  const opts = listCategoriesWithIndexFor(type);
+  const opts = listCategoriesWithIdFor(type);
   const rows = [];
   for (let r = 0; r < Math.ceil(opts.length / 5); r++) {
     const row = [];
     for (let pos = r * 5; pos < Math.min((r + 1) * 5, opts.length); pos++) {
-      const { category, index } = opts[pos];
-      // ★ index — pos БИШ (доторх дараалал шүүлтээс хамаарахгүй)
-      row.push(Markup.button.callback(category, encodeButtonId(txnId, index, isPos, kind)));
+      const { category, id } = opts[pos];
+      // ★ тогтмол id — байрлал БИШ
+      row.push(Markup.button.callback(category, encodeButtonId(txnId, id, isPos, kind)));
     }
     rows.push(row);
   }

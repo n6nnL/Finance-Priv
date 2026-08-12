@@ -7,7 +7,7 @@
 > **⚠️ Нууц утга ЭНД БАЙХГҮЙ.** Зөвхөн орчны хувьсагчийн НЭР бичигдсэн. Бодит утгууд
 > `.env`, `api/.env`, `credentials.json`, `deploy/.deploy.local.env` (бүгд gitignored).
 >
-> Баримт бэлдсэн: 2026-08-03, шинэчилсэн: 2026-08-04. Repo: `D:\Claude`, branch `main`.
+> Баримт бэлдсэн: 2026-08-03, шинэчилсэн: 2026-08-12. Repo: `D:\Claude`, branch `main`.
 > Богино хувилбар: [`FINANCE_PRIV_CONTEXT.md`](FINANCE_PRIV_CONTEXT.md) (архитектур+deploy төлөв).
 
 ---
@@ -72,7 +72,7 @@ D:\Claude\
 
 | Файл | Үүрэг |
 |---|---|
-| `categories.js` | **★ Single source:** 10 ангиллын нэр, emoji+hex metadata, keyword дүрэм, `matchByKeywords()`, `OLD_TO_NEW` mapping. **+ ХАМААРАЛ (applicability):** `CATEGORY_APPLICABILITY` (ангилал → `['income']`/`['expense']`/хоёул), `isCategoryAllowedFor(category, type)` (★ ганц предикат, fail-open), `categoriesFor(type)`, `listCategoriesWithIndexFor(type)` (bot-д — ЖИНХЭНЭ индекс хамт). Backend, listener, frontend ГУРВУУЛАА эндээс импортолно |
+| `categories.js` | **★ Single source:** 10 ангиллын нэр, **ТОГТМОЛ id** + emoji + hex metadata (`CATEGORY_META`), keyword дүрэм, `matchByKeywords()`, `OLD_TO_NEW` mapping. **+ ТОГТМОЛ ID (019):** `CATEGORY_META[c].id` (`dining`/`grocery`/`transport`/`income`/`transfer`/`subs`/`edu`/`leisure`/`apparel`/`other`) + `byId(id)` / `idFor(category)` (Map-аар, **массив руу ХЭЗЭЭ Ч индекслэхгүй**) + `listCategoriesWithIdFor(type)` (bot-д — `{category, id}` хос). Модуль ачаалахад id дутуу/давхардсан бол шууд throw. **+ ХАМААРАЛ (applicability):** `CATEGORY_APPLICABILITY` (ангилал → `['income']`/`['expense']`/хоёул), `isCategoryAllowedFor(category, type)` (★ ганц предикат, fail-open), `categoriesFor(type)`. Backend, listener, frontend ГУРВУУЛАА эндээс импортолно |
 | `transactionActions.js` | **★ Single source (үйлдлийн капабилити):** гүйлгээн дээр ЯМАР үйлдэл боломжтой, ЯМАР талбар асуухыг тодорхойлно. `availableActions(txn)`, `detailFieldFor(txn)` (POS→`merchantPlace`/"Газрын нэр", бусад→`note`/"Шалтгаан"), `isPosTxn`, `isPendingTxn`, `findAction`, `APPLY_TO_ALL_CONFIRM` (баталгаажуулалтын ижил текст). Discord/Telegram/Dashboard ГУРВУУЛАА эндээс уншина — өнгө/байрлал/API дуудлага энд ОРОХГҮЙ |
 | `tokenCrypto.js` | AES-256-GCM `encryptToken/decryptToken/isEncrypted`. Формат `enc:v1:<iv>:<tag>:<ct>`. `TOKEN_ENC_KEY` (64 hex) |
 | `txfields.js` | `detectIsPos(desc)` (BOM дүрэм), `isoDate(s, {anchored})`, **`isoInstant(v)`** (имэйлийн `Date:` → ISO UTC, буруу/байхгүй бол `null`), **`ubTimeLabel(iso)`** (ISO UTC → УБ `HH:mm`, Intl `Asia/Ulaanbaatar` + ICU-гүй үед UTC+8 fallback) — parser, API, Discord, dashboard бүгд ашиглана |
@@ -478,6 +478,10 @@ Discord / Telegram / Website гурвуулан **ижил чадвартай**.
 - **Талбарын урсгал:** `n` товч → modal (одоогийн утга default) → `PATCH .../note`.
 - customId codec (`categories.js`): `c` pending товч · `m` pending modal · `e` ангилал засах ·
   `es` засварын select · `n` талбар засах · `nm` талбарын modal · `ay`/`an` applyToAll.
+- **019: ангилал нь customId дотор ТОГТМОЛ id-ЭЭР** (`c|<txnId>|transport|0`) — массив дахь
+  индекс БИШ. Задаргаа нь `categoryById()` → `config`-ийн `byId()` (Map). Танихгүй id
+  (нислэг дунд байгаа ХУУЧИН индекс-payload) → `null` → «мэдэгдэл хуучирсан» гэж эелдэг
+  унаж, мессежийг шинэ товчнуудаар сэргээнэ (**ХЭЗЭЭ Ч таамаглахгүй**).
 - ⚠️ Polling query-д `WHERE user_id = owner` **ЗААВАЛ** — эс бөгөөс multi-tenant дор бусад
   хэрэглэгчийн гүйлгээ owner-ийн Discord-д алдагдана.
 
@@ -491,6 +495,9 @@ Discord / Telegram / Website гурвуулан **ижил чадвартай**.
 - callback_data codec: `c` pending товч · `ec` **засварын ангиллын товч (stale-check-гүй —
   classified дахин засах нь хэвийн)** · `e` ангилал засах · `n` талбар засах ·
   `sk` алгасах/болих · `ay`/`an` applyToAll.
+- **019: ангилал нь callback_data дотор ТОГТМОЛ id-ЭЭР** (`c|<txnId>|transport|0` = 21 байт,
+  64-ийн хязгаарт тайван). Discord-тэй ИЖИЛ fail-safe: танихгүй id → `null` → «хуучирсан»
+  хариу. `pending` Map-ийн `mode:'detail'` төлөв нь одоо `catIdx` БИШ `catId` хадгална.
 - ⚠️ **`https.Agent({family:4})` ЗААВАЛ** — зарим сервер `api.telegram.org`-д IPv6 DNS
   буцаадаг ч route байхгүй → ETIMEDOUT.
 - ⚠️ `bot.launch()`-ийн Promise bot зогсох хүртэл resolve хийхгүй (telegraf-ийн зан төлөв) —
@@ -541,20 +548,22 @@ Discord / Telegram / Website гурвуулан **ижил чадвартай**.
 
 ---
 
-## 12. Тест (нийт **264**, бүгд `node --test`)
+## 12. Тест (нийт **309**, бүгд `node --test`)
 
 ⚠️ Root дээрх `npm test` (= `node --test`) нь **recursive** тул доорх БҮХ багцыг
-(api/telegram/discord/dashboard оруулаад) нэг дор ажиллуулж **300** гэж мэдээлдэг.
+(api/telegram/discord/dashboard оруулаад) нэг дор ажиллуулж **309** гэж мэдээлдэг.
 Багц бүрийг тусад нь ажиллуулах командыг баруун баганад бичив.
+⚠️ Git Bash дээр `node --test test/` нь заримдаа "MODULE_NOT_FOUND" өгдөг —
+`node --test test/*.test.js` гэж glob-оор бичвэл найдвартай.
 
 | Багц | Тоо | Ажиллуулах |
 |---|---|---|
 | API | **179** (api 12, auto-classify 3, balance-history 18, balance 6, budget-status 12, budget 8, **category-applicability 11**, dashboard 17, **debt-ledger 19**, gmail-auth 12, google-auth 11, google-provider 3, manual-savings 16, **partial-exclusion 12**, **email-received-at 6**, telegram 6, token-crypto 7) | `cd api && npm test` |
-| Дундын (`test/`) | **51** (golomt 12, categorize 10, shared 4, transactionActions 7, **emailReceivedAt 5**, **categoryApplicability 9**, **categoryButtonIndex 4**) | `node --test test/` |
+| Дундын (`test/`) | **59** (golomt 12, categorize 10, shared 4, transactionActions 7, **emailReceivedAt 5**, **categoryApplicability 9**, **categoryStableId 6**, **categoryButtonId 6**) | `node --test test/*.test.js` |
 | Listener модуль | **12** (accounts 4, manager 4, balanceAlert 4) | `node --test src/*.test.js` |
 | Telegram | **18** (db 10, isolation 2, **category-filter 6**) | `cd telegram && npm test` |
 | Dashboard цэвэр логик | **26** (budget 12, **debt 14**) | `node --test dashboard/src/lib/*.test.js` |
-| Discord | **14** (categories 5, **notify 3**, **category-filter 6**) | `cd discord && npm test` |
+| Discord | **15** (categories 6, **notify 3**, **category-filter 6**) | `cd discord && npm test` |
 
 Загвар: API тестүүд жинхэнэ `createApp()`-г `:memory:` DB дээр ачаалж, HTTP түвшинд шалгана
 (mock биш). Цэвэр логик (budgetCycle, balanceHistory, budget.js, manager.js,
@@ -589,17 +598,33 @@ isolation · **бодит "хуваасан хоол" хувилбар** (90к �
 (хуучин listener) push → 201 · ISO биш string → 400 · two-user isolation ·
 Discord embed-д NULL үед цаг нэмэхгүй, утгатай үед УБ HH:mm (шөнө дунд давсан кейс).
 
-`categoryApplicability.test.js` + `categoryButtonIndex.test.js` + `api/test/category-applicability.test.js`
+`categoryApplicability.test.js` + `api/test/category-applicability.test.js`
 + `discord|telegram/…/category-filter.test.js` (018) ★: `isCategoryAllowedFor` — Орлого
 зөвхөн income · Шилжүүлэг/Бусад хоёуланд · 7 нь зөвхөн expense · **танихгүй ангилал
 fail-open** · type тодорхойгүй үед хязгаарлахгүй · `categoriesFor` дараалал хадгална
-(expense 9 / income 3) · **★ ИНДЕКСИЙН УРХИ:** шүүсэн олонлогоос кодолсон товчийг
-задлахад ЗӨВ нэр гарна (Discord ба Telegram, `c`/`ec` хоёул) — "Орлого"-гийн индекс
-шүүлтийн дараа ч **3 хэвээр** (pos=0 БОЛОХГҮЙ), builder-ийн бодит гаралт дээр шошго =
-задарсан ангилал · эгнээнд ≤5 товч, хоосон эгнээгүй · `type`-гүй хуучин дуудлага → 10
+(expense 9 / income 3) · builder-ийн бодит гаралт дээр шошго =
+задарсан ангилал (Discord ба Telegram, `c`/`ec` хоёул) · эгнээнд ≤5 товч, хоосон
+эгнээгүй · `type`-гүй хуучин дуудлага → 10
 товч (fail-open) · **сервер backstop:** зарлага+Орлого → 400 (мөр хөндөгдөхгүй,
 override ч үүсэхгүй), орлого+Тээвэр → 400, хоёуланд тохирох → 200, `/overrides`-д
 зөвхөн орлогын ангилал → 400 · `GET /api/categories` **10-аа буцаасан хэвээр**.
+
+`categoryStableId.test.js` + `categoryButtonId.test.js` (019, өмнөх
+`categoryButtonIndex.test.js`-ийг ОРЛОВ) ★: ангилал бүр давхардаагүй тогтмол id-тай ·
+id нь **≤12 тэмдэгт, `^[a-z][a-z0-9_]*$`, ЦЭВЭР ТОО БИШ** (fail-safe-ийн үндэс) ·
+id↔ангилал round-trip · `byId` нь **хуучин индекс ('0'…'99'), prototype түлхүүр
+('constructor'/'__proto__'), тоон утга, том үсэг** бүхэнд `null` · **★ CATEGORIES-ийг
+газар дээр нь УРВУУЛЖ, дунд нь шинэ ангилал ОРУУЛСАН ч id бүр ИЖИЛ ангилал руугаа
+бууна** (энэ refactor-ийн бүх утга учир) · Discord customId ≤100 тэмдэгт / Telegram
+callback_data ≤64 БАЙТ · **хуучин индекс-payload `c|123|4|1` → `categoryById()` = null**
+(Discord `c`/`m`, Telegram `c`/`ec` бүгдэд) · хоёр bot ИЖИЛ id орон зайг ашиглана.
+
+`scripts/category-id.verify.mjs` (019, ops verify — `npm test`-д ОРООГҮЙ): жинхэнэ
+`createApp()` + `:memory:` DB дээр **pending → БОДИТ товч → payload задаргаа →
+`PATCH /:id/category` → DB-д бичигдсэн утга** гэсэн бүтэн гинжийг шалгана. Гол баталгаа:
+**товчны ШОШГО = DB-д бичигдсэн ангилал** (9 зарлагын ангилал бүрд), modal дамжсаны
+дараа ч ижил, орлогын мөрд шүүсэн жагсаалтын байрлал ≠ id, ба **хуучин payload дээр
+PATCH огт дуудагдахгүй → мөр `pending_review` хэвээр, override ч үүсэхгүй**.
 
 ---
 
@@ -627,6 +652,16 @@ override ч үүсэхгүй), орлого+Тээвэр → 400, хоёулан
 11. **`applyToAll` = default OFF, ТОДОРХОЙ баталгаажуулалттай** — гурван клиент дээр ижил.
     Шинэ бичих урсгал нэмэхдээ `applyToAll`-ыг hardcode `true` болгохгүй; баталгаажуулалтын
     текстийг `APPLY_TO_ALL_CONFIRM`-ээс авна.
+12. **★ Ангиллыг ХЭЗЭЭ Ч БАЙРЛАЛААР бүү дамжуул (019).** Client ↔ client хооронд явах
+    ямар ч payload (Discord `customId`, Telegram `callback_data`, ирээдүйн deep-link,
+    кэш, түр төлөв) ангиллыг **ТОГТМОЛ id-ЭЭР** кодлоно — `CATEGORIES` дахь индексээр
+    БИШ. Задлахдаа **зөвхөн `byId()`** (эсвэл bot-ын `categoryById()`) — массив руу
+    индекслэх fallback бичихийг **ХОРИГЛОНО**. Танихгүй id → **эелдэг унана**
+    ("мэдэгдэл хуучирсан"), ХЭЗЭЭ Ч таамаглахгүй: буруу таамаг нь `applyToAll`-аар
+    мерчантын БҮХ түүхэнд тарна. Шинэ ангилал нэмэхдээ `CATEGORY_META`-д **шинэ**
+    id өгнө (хуучныг дахин ашиглахгүй), id нь богино ASCII ба **цэвэр тоо БИШ**
+    (энэ нь хуучин индекс-payload-ыг ялгах чадварын үндэс). DB-д хадгалагдах утга нь
+    ӨМНӨХ ЧИГЭЭР ангиллын **НЭР** — id нь зөвхөн payload-ын кодлол.
 
 ---
 
@@ -646,17 +681,48 @@ override ч үүсэхгүй), орлого+Тээвэр → 400, хоёулан
 | ⚠️ **Хасалт = ЗӨВХӨН шинжилгээ** | Найзын билетийг картаараа авахад мөнгө **бодитоор** дансаас гардаг тул `balance`/`balance-history`-д **ЗААВАЛ** тоологдоно; зөвхөн "Тээвэр 600% хэтэрсэн" гэх ангиллын гажуудлыг арилгахаар төсөв/шинжилгээнээс хасагдана. Шинэ analytics query нэмэхдээ **`NET_AMOUNT` (`amount - COALESCE(excluded_amount,0)`) + `AND excluded_from_budget = 0`** хоёуланг бичихээ бүү мартаарай; эсрэгээр **үлдэгдлийн** query-д ХЭЗЭЭ Ч бүү нэм (тэнд ҮРГЭЛЖ бүтэн `amount`). `buildWhere(userId, {budgetOnly:true})` нь шүүлтийг өгнө — `listTransactions` түүнийг ЗОРИУД дамжуулдаггүй, **бас net хийдэггүй** (хэрэглэгч бүтэн гүйлгээгээ хараад удирдах ёстой) |
 | ⚠️ **016: шүүлт БИШ, ЦЭВЭР НИЙЛБЭР** | 4 query (`getSummary`/`getMonthly`/`getByCategory`/`getCycleSpend`) нь одоо мөрийг хаядаггүй, **`amount − excluded_amount`-ыг нийлбэрлэдэг**. `excluded_from_budget = 0` шүүлт нь ҮЛДСЭН — БҮРЭН хасагдсан мөр (цэвэр дүн нь аль хэдийн 0) `count`/бүлэгт орж 015-ын зан төлөвийг эвдэхээс сэргийлнэ. Хэсэгчилсэн мөр шүүгдэхгүй, зөвхөн дүн нь багасна. Хоёрын **аль нэгийг** орхивол тоо чимээгүй гажина |
 | ⚠️ **016: олон бичлэг — ДАХИН ТООЦООЛ** | Гүйлгээний `excluded_amount` = холбогдсон БҮХ өрийн бичлэгийн `exclusionShare ?? amount`-ын нийлбэр. Холбоос/дүн өөрчлөгдөх бүрд `recomputeTransactionExclusion()` нь лавлагаануудаас **шинээр** тооцоолно (тоолуур нэмэгдүүлэх/хасах БИШ → retry, давхар дуудалт, хэсэгчилсэн бүтэлгүйтэлд ч зөв). Нэг бичлэг салахад бусдын хувь хэмжээг **ХЭЗЭЭ Ч 0 болгож бүү цэвэрлэ**. Хэтрэлт/валют зөрөлт → `ExclusionError` → транзакц бүхэлдээ rollback → route 400 |
-| ⚠️ **018: ангиллын picker нь ТӨРЛӨӨР шүүгддэг** | Ангиллын сонголт бүр (Dashboard `RowPanel` + `ConfirmModal`, Discord товч/select, Telegram keyboard) `isCategoryAllowedFor(category, row.type)`-оор шүүгдэнэ. Шинэ picker/клиент нэмэхдээ **бүтэн `CATEGORIES`-г шууд рендерлэхийг ХОРИГЛОНО** — `categoriesFor(type)` (нэрээр кодлодог UI) эсвэл `listCategoriesWithIndexFor(type)` (индексээр кодлодог bot) ашиглана. Сервер тал ч шалгана (`PATCH /:id/category` → 400) |
-| ⚠️ **018: BOT-ЫН ИНДЕКСИЙН УРХИ** | Discord/Telegram нь сонгосон ангиллыг customId/`callback_data` дотор **бүтэн `CATEGORIES` массив дахь ИНДЕКСЭЭР** дамжуулж, `categoryByIndex()`-ээр задалдаг (мөрийн урт хязгаартай тул). Хэрэв `CATEGORIES.filter(...)` хийгээд **шүүсэн массивын шинэ индексийг** кодловол товч бүр **БУРУУ ангилал** илгээнэ — алдаа мэдэгдэхгүй, `applyToAll` нь мерчантын БҮХ түүхэнд тараана. Тиймээс `listCategoriesWithIndexFor(type)` нь `{category, index}` хос буцаана: **`index`-ийг кодол, давталтын байрлалыг (pos) зөвхөн эгнээ таслахад ашигла**. Эгнээ таслах давталтыг ч **шүүсэн** жагсаалтын уртаар бич (`CATEGORIES.length` БИШ). Discord-ийн засварын select нь НЭРЭЭР кодлодог тул энэ урхинд өртөхгүй. `test/categoryButtonIndex.test.js` + хоёр bot-ийн `category-filter.test.js` үүнийг түгжсэн |
+| ⚠️ **018: ангиллын picker нь ТӨРЛӨӨР шүүгддэг** | Ангиллын сонголт бүр (Dashboard `RowPanel` + `ConfirmModal`, Discord товч/select, Telegram keyboard) `isCategoryAllowedFor(category, row.type)`-оор шүүгдэнэ. Шинэ picker/клиент нэмэхдээ **бүтэн `CATEGORIES`-г шууд рендерлэхийг ХОРИГЛОНО** — `categoriesFor(type)` (нэрээр кодлодог UI) эсвэл `listCategoriesWithIdFor(type)` (payload-д id кодлодог bot) ашиглана. Сервер тал ч шалгана (`PATCH /:id/category` → 400) |
+| ✅ **018: BOT-ЫН ИНДЕКСИЙН УРХИ — ШИЙДЭГДСЭН (019)** | **Байхаа больсон.** Өмнө нь Discord/Telegram ангиллыг customId/`callback_data` дотор **массив дахь ИНДЕКСЭЭР** дамжуулдаг байсан тул `CATEGORIES`-ийн дараалал өөрчлөгдөх/дунд нь ангилал нэмэх бүрд товч бүр чимээгүй **БУРУУ ангилал** илгээх эрсдэлтэй байв. 019-д индекс кодлол **бүрмөсөн устгагдаж**, ТОГТМОЛ id (`transport`, `dining` …) болов; `listCategoriesWithIndexFor()`/`categoryByIndex()`/`indexOfCategory()` устсан. Одоо дараалал өөрчлөх нь **аюулгүй** (§13.12 нь дүрмийг тогтоов, `test/categoryStableId.test.js` нь массивыг урвуулж/дунд нь ангилал нэмж түгжсэн). Үлдсэн ганц анхаарах зүйл: эгнээ таслах давталтыг **шүүсэн** жагсаалтын уртаар бич (`CATEGORIES.length` БИШ) — энэ нь зөвхөн харагдацын алдаа |
+| ⚠️ **019: ТОГТМОЛ id нь ГЭРЭЭ — бүү сольж/дахин ашигла** | `CATEGORY_META[c].id` нь client-д ИЛГЭЭГДСЭН мэдэгдлүүд дотор амьдардаг. Id-г **өөрчлөх** → тэр ангиллын хуучин товчнууд "хуучирсан" болно (аюулгүй ч эвгүй); id-г **дахин ашиглах** (өөр ангилалд өгөх) → нислэг дунд байгаа товч **БУРУУ ангилал** бичих цорын ганц зам — тиймээс ХЭЗЭЭ Ч бүү хий. Id нь **цэвэр тоо байж болохгүй**: хуучин индекс-payload-ыг ялгах чадвар яг үүн дээр тогтдог. Дутуу/давхардсан id → модуль ачаалахад throw (тестээр баригдана) |
 | ⚠️ **018: хуучин "хууль бус" мөрүүд** | Applicability нэмэгдэхээс ӨМНӨ үүссэн зөрчилтэй мөр (ж: `income` + `Тээвэр`) **ХЭВЭЭР үлдэнэ — миграц хийгээгүй** (зориуд). `catLabel/catEmoji/catHex` нь applicability үл харах тул жагсаалтад хэвийн харагдана. Ганц ялгаа: засварын panel-д тухайн утга сонголтын жагсаалтад байхгүй тул **идэвхтэй товч харагдахгүй** — хэрэглэгч зөвшөөрөгдсөн утга сонгож л засна |
 | ⚠️ **Override нь ЗӨВХӨН ingest дээр, тэр ч дутуу** | `classify.js` нь таарсан override-оос **ЗӨВХӨН `category`**-г авдаг — `friendly_name` (газрын нэр) ба `default_note` (шалтгаан) нь гүйлгээний мөрөнд **ХЭЗЭЭ Ч бичигддэггүй**. Тэдгээр нь зөвхөн УНШИХ үед `attachOverrideInfo()`-оор virtual-аар хавсрагдана (`friendly_name`/`override_note` талбар), эсвэл `applyToAll` баталгаажуулалтын АГШИНД `updateCategoryByPattern()` тухайн үед байсан мөрүүдэд бичнэ (мөн `manually_edited=1` тавина). Тиймээс override үүсэхээс ӨМНӨХ ч, ХОЙНОХ ч автомат мөрүүд газрын нэр/шалтгаангүй хоцордог → түүхэн мөрийг [`scripts/backfill-overrides.js`](scripts/backfill-overrides.js)-ээр эвлэрүүлнэ (§3.5). Backfill-ийн таарал нь ingest-тэйгээ ЯГ ИЖИЛ байх ЁСТОЙ, эс бөгөөс дараагийн ingest backfill-ийн тавьсныг эргүүлж дарна |
 | Хасалтын хязгаар хаана хэрэгжсэн бэ | `excluded_amount ≥ 0` — **баганын CHECK**. `excluded_amount ≤ amount` — SQLite-д cross-column CHECK бичих боломжгүй тул **API давхарга (`setTransactionExcludedAmount`) + 2 trigger** (INSERT/UPDATE, `1e-6` хүлцэлтэй). Float нийлбэрийн бөөрөнхийлөлт "бүрэн хасагдсан"-ыг эвдэхээс сэргийлж `EXCLUSION_EPS = 1e-6` хэрэглэдэг |
 
 ---
 
-## 15. Одоогийн төлөв (2026-08-06)
+## 15. Одоогийн төлөв (2026-08-12)
 
 - Серверт 4 pm2 процесс online, домейн амьд.
+- **★ СҮҮЛИЙН АЖИЛ — BOT-ЫН PAYLOAD ТОГТМОЛ ID БОЛОВ (019, ⏸ DEPLOY ХИЙГЭЭГҮЙ —
+  Tuguldur-ийн зөвшөөрөл хүлээж байна). МИГРАЦ БАЙХГҮЙ — schema огт хөндөөгүй,
+  DB-д бичигдэх утга ӨӨРЧЛӨГДӨӨГҮЙ:** Discord/Telegram нь ангиллыг товчны payload
+  дотор `CATEGORIES` массив дахь **ИНДЕКСЭЭР** дамжуулдаг байсныг **ТОГТМОЛ
+  string id**-ээр солив (`dining`/`grocery`/`transport`/`income`/`transfer`/`subs`/
+  `edu`/`leisure`/`apparel`/`other`). Энэ бол **зан төлөв ИЖИЛ, цэвэр refactor** —
+  ангилал нэмээгүй/хасаагүй/нэр-emoji-өнгө өөрчлөөгүй, дараалал хэвээр, DB бичилт
+  байт бүрээрээ ижил (`scripts/category-id.verify.mjs` нь 9 ангилал бүрд «товчны
+  шошго = DB-д бичигдсэн ангилал»-ыг жинхэнэ API дээр баталсан). Зорилго: дараагийн
+  **дэд ангиллын (subcategory)** ажил `CATEGORIES`-д шинэ мөр нэмэхэд нислэг дунд
+  байгаа товчнууд буруу ангилал руу шилжихээс сэргийлэх (§14-ийн индексийн урхи
+  **ШИЙДЭГДЛЭЭ**).
+  `config/categories.js`: `CATEGORY_META`-д `id`, `byId()`/`idFor()` (Map — массив руу
+  индекслэхгүй), `listCategoriesWithIdFor()`; `listCategoriesWithIndexFor()` УСТСАН.
+  Хоёр bot-ын codec (`categoryById`, `encodeButtonId`, `encodeModalId`, `parseId` →
+  `catId`), builder (`notify.js` ×2), handler (`bot.js` ×2, Telegram-ийн `pending`
+  төлөв `catIdx`→`catId`).
+  ⚠️ **НИСЛЭГ ДУНДЫН АЮУЛГҮЙ БАЙДАЛ:** deploy-ийн ӨМНӨ илгээгдсэн мэдэгдлийн товч
+  индексээр кодлогдсон (`c|123|4|1`). Шинэ парсер массив руу индекслэх fallback
+  **ОГТ ХИЙХГҮЙ** — бүх id үсгэн тул `"4"` нь Map-д олдохгүй → `null` → «⚠️ Энэ
+  мэдэгдэл хуучирсан байна. Дахин ачаална уу» гэсэн эелдэг хариу (Discord нь
+  мессежийг шинэ товчнуудаар нь сэргээнэ). **PATCH огт дуудагдахгүй** тул мөр
+  `pending_review` хэвээр, override ч үүсэхгүй — тестээр түгжсэн.
+  **Ingest зам (`api/`, `src/`) ХӨНДӨӨГҮЙ** — `api/` дор нэг ч файл өөрчлөгдөөгүй тул
+  API+listener-ийг хамт гаргах шаардлагагүй; deploy нь **зөвхөн хоёр bot** (§10).
+  Шинэ тест 13 (дундын `categoryStableId` 6 + `categoryButtonId` 6, Discord +1);
+  `categoryButtonIndex.test.js` (4) устсан — нийт **309** ногоон.
+  Дашрамд: `scripts/discord-edit.verify.mjs` нь multi-tenant ingest гарснаас хойш
+  `userId`-гүй POST-оор [B]-ээс цааш **унадаг байсныг** (энэ refactor-той хамааралгүй,
+  өмнөх ажлын хоцрогдол) зассан.
 - Calendar/Telegram холбогдоогүй. Telegram bot ажиллаж байна.
 - AI ангилал **унтраалттай** (`AI_CATEGORIZATION_ENABLED=false`) — credit байхгүй. Асаахад
   танигдаагүй мерчантад санал өгнө; унтраалттай үед зүгээр pending_review болно.
@@ -674,7 +740,7 @@ override ч үүсэхгүй), орлого+Тээвэр → 400, хоёулан
   Дараа нь дахин dry-run → **0 мөр** (идемпотент, бодит DB дээр батлагдсан).
   Өмнө нь `scripts/backup.sh` (`transactions-2026-08-07_1208.sqlite.gz`,
   `integrity_check: ok`). Хожим override нэмэгдэх бүрд дахин ажиллуулж болно.
-- **★ Сүүлийн ажил — АНГИЛЛЫН ХАМААРАЛ / applicability (018, ✅ DEPLOY ХИЙГДСЭН
+- **★ Өмнөх ажил — АНГИЛЛЫН ХАМААРАЛ / applicability (018, ✅ DEPLOY ХИЙГДСЭН
   2026-08-06, commit `03b8ab8`). МИГРАЦ БАЙХГҮЙ — schema хөндөөгүй, зөвхөн одоо байгаа
   `type` баганыг УНШИНА:** Зарлаган гүйлгээн дээр ангилал сонгохдоо "Орлого" гарч,
   хадгаламж татах зэрэг мөрийг утгагүй ангилах боломжтой байсныг хаав.
@@ -687,6 +753,7 @@ override ч үүсэхгүй), орлого+Тээвэр → 400, хоёулан
   тодорхойлох боломжгүй — §5). `api/ai.js`-ийн prompt-оос орлогын ангилал хасагдав
   (AI салаа зөвхөн зарлагад хүрдэг тул "Орлого" санал ҮРГЭЛЖ буруу байсан).
   ⚠️ Bot-ын **индексийн урхи** (§14) — шүүсэн ч ЖИНХЭНЭ индекс кодлогдоно, тестээр түгжсэн.
+  → **019-д энэ урхи бүрмөсөн арилсан** (индекс кодлол өөрөө устаж, тогтмол id болсон).
   Шинэ тест **36** (дундын 13, API 11, Discord 6, Telegram 6) — нийт **300** ногоон.
   Хуучин "хууль бус" мөрүүдэд **миграц хийгээгүй** (зориуд) — харагдац эвдрээгүйг
   бодит апп дээр шалгасан. Deploy: dashboard `dist` + API + хоёр bot.

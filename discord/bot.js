@@ -17,7 +17,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { config } from './config.js';
 import {
-  categoryByIndex, encodeModalId, encodeCatSelectId, encodeFieldModalId,
+  categoryById, encodeModalId, encodeCatSelectId, encodeFieldModalId,
   encodeApplyAllId, parseId,
 } from './categories.js';
 import { categoriesFor } from '../config/categories.js';
@@ -118,6 +118,14 @@ async function refreshStaleMessage(messageId, row) {
 // txnId → { category, extra, messageId }. Restart-д алдагдвал товч дарахад
 // "хугацаа дууссан" гэж эелдэг хариулна (эрсдэлгүй).
 const pendingConfirm = new Map();
+
+// ⚠️ ХУУЧИН (нислэг дунд) PAYLOAD. Энэ deploy-ийн ӨМНӨ илгээгдсэн мэдэгдлийн
+// товчнууд ангиллыг ИНДЕКСЭЭР кодолсон байдаг ('c|123|4|1'). Шинэ парсер тэдгээрийг
+// ТАНИХГҮЙ бөгөөд ЗОРИУДААР массив руу индекслэх fallback хийхгүй — таамагласан
+// ангилал нь applyToAll-аар мерчантын БҮХ түүхэнд тарах эрсдэлтэй. Оронд нь
+// эелдэг унаж, мессежийг шинэ товчнуудаар сэргээнэ.
+const STALE_PAYLOAD_MSG =
+  '⚠️ Энэ мэдэгдэл хуучирсан байна. Дахин ачаална уу — доорх шинэчлэгдсэн товчнуудыг ашиглана уу.';
 
 /** applyToAll Тийм/Үгүй товчны эгнээ (текст нь дундын модулиас). */
 function applyAllButtons(txnId) {
@@ -232,8 +240,14 @@ client.on('interactionCreate', async (interaction) => {
 
       // --- pending ангиллын товч (Prompt 2) ---
       if (p.kind !== 'c') return;
-      const cat = categoryByIndex(p.catIdx);
-      if (!cat) return;
+      const cat = categoryById(p.catId);
+      if (!cat) {
+        // Хуучин индекс-кодлолтой товч → БУРУУ ангилал бичихийн оронд эелдэг унана
+        await interaction.reply({ content: STALE_PAYLOAD_MSG, ephemeral: true });
+        const fresh = await getTransaction(p.txnId).catch(() => null);
+        if (fresh) await refreshStaleMessage(interaction.message.id, fresh); // шинэ товчнууд
+        return;
+      }
 
       // Одоогийн төлөвийг API-аас шалгах (Dashboard-аар шийдэгдсэн эсэх).
       // localhost GET — хурдан тул showModal-ийн 3с төсөвт багтана.
@@ -255,7 +269,7 @@ client.on('interactionCreate', async (interaction) => {
       // Асуулт/жишээ дундын модулиас — POS бол Газрын нэр, бусад бол Шалтгаан
       const detail = detailFieldFor({ is_pos: p.isPos ? 1 : 0 });
       const modal = new ModalBuilder()
-        .setCustomId(encodeModalId(p.txnId, p.catIdx, p.isPos, interaction.message.id))
+        .setCustomId(encodeModalId(p.txnId, p.catId, p.isPos, interaction.message.id))
         .setTitle(`${cat} болгох`);
       const input = new TextInputBuilder()
         .setCustomId('value')
@@ -331,8 +345,8 @@ client.on('interactionCreate', async (interaction) => {
       if (p.kind !== 'm') return;
       // ⚠️ API бичихээс ӨМНӨ заавал ack (3с дотор) — "interaction failed"-аас сэргийлнэ.
       await interaction.deferReply({ ephemeral: true });
-      const cat = categoryByIndex(p.catIdx);
-      if (!cat) { await interaction.editReply('Ангилал танигдсангүй'); return; }
+      const cat = categoryById(p.catId);
+      if (!cat) { await interaction.editReply(STALE_PAYLOAD_MSG); return; }
 
       // Interaction үед төлөвийг дахин татах (modal нээгдсэнээс хойш Dashboard-аар
       // шийдэгдсэн байж болзошгүй).

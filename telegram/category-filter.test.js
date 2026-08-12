@@ -1,15 +1,15 @@
 // ============================================================
 //  category-filter.test.js — buildCategoryKeyboard нь гүйлгээний ТӨРЛӨӨР
-//  шүүх ба ★ ЖИНХЭНЭ ИНДЕКСИЙГ хадгалахыг шалгана (discord-ийн ижил тест).
+//  шүүх ба товч бүр ЗӨВ ангилал руу задрахыг шалгана (discord-ийн ижил тест).
 //
 //  БОДИТ builder-ийн (telegraf inline keyboard) гаралт дээр — callback_data-г
-//  задлаад ангиллын нэр рүү буцаана. Индексийн урхинд унасан бол ЭНД баригдана.
+//  задлаад ангиллын нэр рүү буцаана (тогтмол id-ээр).
 // ============================================================
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildCategoryKeyboard, keyboardFor } from './notify.js';
-import { categoryByIndex, parseId } from './categories.js';
+import { categoryById, parseId } from './categories.js';
 
 /** inline_keyboard-оос [{label, decoded, kind}] гаргана */
 function decodeKb(kb) {
@@ -17,7 +17,7 @@ function decodeKb(kb) {
   for (const row of kb.reply_markup.inline_keyboard) {
     for (const btn of row) {
       const p = parseId(btn.callback_data);
-      out.push({ label: btn.text, decoded: p ? categoryByIndex(p.catIdx) : null, kind: p?.kind });
+      out.push({ label: btn.text, decoded: p ? categoryById(p.catId) : null, kind: p?.kind });
     }
   }
   return out;
@@ -34,12 +34,12 @@ test('ОРЛОГО: зөвхөн 3 товч (Орлого / Шилжүүлэг /
   assert.deepEqual(btns.map((b) => b.label), ['Орлого', 'Шилжүүлэг & гэр бүл', 'Бусад']);
 });
 
-test('★ Товч бүрийн ШОШГО = задарсан АНГИЛАЛ (индекс шилжээгүй)', () => {
+test('★ Товч бүрийн ШОШГО = задарсан АНГИЛАЛ (id зөв кодлогдсон)', () => {
   for (const type of ['expense', 'income', null]) {
     for (const kind of ['c', 'ec']) {
       for (const b of decodeKb(buildCategoryKeyboard(42, false, kind, type))) {
         assert.equal(b.decoded, b.label,
-          `${type}/${kind}: "${b.label}" товч "${b.decoded}" болж задарлаа — ИНДЕКС ШИЛЖСЭН`);
+          `${type}/${kind}: "${b.label}" товч "${b.decoded}" болж задарлаа`);
         assert.equal(b.kind, kind, 'kind (c/ec) хадгалагдах ёстой');
       }
     }

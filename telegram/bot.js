@@ -20,7 +20,7 @@ import { config } from './config.js';
 import { createTelegramStore } from './db.js';
 import { mintAccessToken } from './jwtAuth.js';
 import { patchCategory, updateFields, getTransaction } from './apiClient.js';
-import { categoryByIndex, parseId, encodeApplyAllId, encodeSkipId } from './categories.js';
+import { categoryById, parseId, encodeApplyAllId, encodeSkipId } from './categories.js';
 import { buildText, keyboardFor, buildCategoryKeyboard } from './notify.js';
 import { APPLY_TO_ALL_CONFIRM, detailFieldFor } from '../config/transactionActions.js';
 
@@ -41,10 +41,17 @@ const bot = new Telegraf(config.botToken, {
 // --- pending follow-up төлөв (chat бүрд нэг) ---
 // chatId → { mode, txnId, ... }:
 //   mode:'detail'  — ангилал сонгосны дараах талбарын текст хүлээж байна
-//                    { catIdx, isPos, chatId, messageId }
+//                    { catId, isPos, chatId, messageId }
 //   mode:'confirm' — applyToAll Тийм/Үгүй товч хүлээж байна (+ value)
 //   mode:'field'   — дан талбарын засварын текст хүлээж байна { apiField }
 const pending = new Map();
+
+// ⚠️ ХУУЧИН (нислэг дунд) PAYLOAD. Энэ deploy-ийн ӨМНӨ илгээгдсэн мессежийн
+// товчнууд ангиллыг ИНДЕКСЭЭР кодолсон байдаг ('c|123|4|1'). Шинэ парсер тэдгээрийг
+// ТАНИХГҮЙ бөгөөд ЗОРИУДААР массив руу индекслэх fallback хийхгүй — таамагласан
+// ангилал нь applyToAll-аар мерчантын БҮХ түүхэнд тарах эрсдэлтэй.
+const STALE_PAYLOAD_MSG =
+  '⚠️ Энэ мэдэгдэл хуучирсан байна. Дахин ачаална уу — «✏️ Ангилал засах» товчоор дахин сонгоно уу.';
 
 function loadState() {
   try { return JSON.parse(readFileSync(config.statePath, 'utf8')); } catch { return null; }
@@ -256,8 +263,8 @@ bot.on('callback_query', async (ctx) => {
       const st = pending.get(ctx.chat.id);
       if (!st || st.mode !== 'confirm' || st.txnId !== p.txnId) return;
       pending.delete(ctx.chat.id);
-      const cat = categoryByIndex(st.catIdx);
-      if (!cat) return;
+      const cat = categoryById(st.catId);
+      if (!cat) { await ctx.reply(STALE_PAYLOAD_MSG); return; }
       // Талбарын түлхүүрийг модулиас (client өөрөө merchantPlace/note шийдэхгүй)
       const extra = st.value ? { [detailFieldFor({ is_pos: st.isPos ? 1 : 0 }).apiField]: st.value } : {};
       await applyCategory(ctx, userId, st.txnId, cat, extra, p.kind === 'ay', st.chatId, st.messageId);
@@ -266,8 +273,13 @@ bot.on('callback_query', async (ctx) => {
 
     // --- Ангиллын товч ('c' = pending баталгаажуулах, 'ec' = classified засах) ---
     if (p.kind !== 'c' && p.kind !== 'ec') { await ctx.answerCbQuery(); return; }
-    const cat = categoryByIndex(p.catIdx);
-    if (!cat) { await ctx.answerCbQuery(); return; }
+    const cat = categoryById(p.catId);
+    if (!cat) {
+      // Хуучин индекс-кодлолтой товч → БУРУУ ангилал бичихийн оронд эелдэг унана
+      await ctx.answerCbQuery('Мэдэгдэл хуучирсан');
+      await ctx.reply(STALE_PAYLOAD_MSG);
+      return;
+    }
 
     const current = await getTransaction(token, p.txnId);
     if (!current) {
@@ -286,7 +298,7 @@ bot.on('callback_query', async (ctx) => {
 
     await ctx.answerCbQuery();
     pending.set(ctx.chat.id, {
-      mode: 'detail', txnId: p.txnId, catIdx: p.catIdx, isPos: p.isPos,
+      mode: 'detail', txnId: p.txnId, catId: p.catId, isPos: p.isPos,
       chatId: originChatId, messageId: originMessageId,
     });
     // Асуулт/жишээ дундын модулиас — POS бол Газрын нэр, бусад бол Шалтгаан

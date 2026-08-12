@@ -5,7 +5,7 @@
 import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import { encodeButtonId, encodeEditButtonId, encodeFieldButtonId } from './categories.js';
 import { isPendingTxn, detailFieldFor } from '../config/transactionActions.js';
-import { listCategoriesWithIndexFor } from '../config/categories.js';
+import { listCategoriesWithIdFor } from '../config/categories.js';
 import { ubTimeLabel } from '../config/txfields.js';
 
 const COLOR_EXPENSE = 0xef4444; // улаан
@@ -63,27 +63,25 @@ export function buildEmbed(tx) {
 /**
  * Танигдаагүй гүйлгээнд тохирох ангиллын товчлуурууд (эгнээнд 5).
  *
- * ⚠️ ИНДЕКСИЙН УРХИ: customId дотор ангиллыг БҮТЭН CATEGORIES массив дахь
- * индексээр дамжуулж, categoryByIndex()-ээр задалдаг. Хэрэв CATEGORIES-г
- * шүүгээд ШИНЭ индексийг кодловол товч бүр БУРУУ ангилал илгээх ба алдаа
- * мэдэгдэхгүй (applyToAll нь мерчантын бүх түүхэнд тараана). Тиймээс
- * listCategoriesWithIndexFor() нь ЖИНХЭНЭ индексийг хамт буцаана — доор
- * `index`-ийг кодолж, `pos`-ийг зөвхөн эгнээ таслахад ашиглана.
+ * ★ customId дотор ангиллын ТОГТМОЛ id кодлогдоно (массив дахь байрлал БИШ) —
+ * тиймээс CATEGORIES-ийн дараалал өөрчлөгдөх/дунд нь шинэ ангилал орох нь
+ * илгээгдсэн товчнуудад ОГТ нөлөөлөхгүй. Давталтын байрлал (`pos`) нь зөвхөн
+ * эгнээ таслах (Discord-ийн эгнээнд 5 товч) зорилготой.
  *
  * @param {number} txnId
  * @param {boolean} isPos
  * @param {'income'|'expense'|null} [type] гүйлгээний төрөл (шүүлтэд)
  */
 export function buildButtonRows(txnId, isPos, type) {
-  const opts = listCategoriesWithIndexFor(type);
+  const opts = listCategoriesWithIdFor(type);
   const rows = [];
   for (let r = 0; r < Math.ceil(opts.length / 5); r++) {
     const row = new ActionRowBuilder();
     for (let pos = r * 5; pos < Math.min((r + 1) * 5, opts.length); pos++) {
-      const { category, index } = opts[pos];
+      const { category, id } = opts[pos];
       row.addComponents(
         new ButtonBuilder()
-          .setCustomId(encodeButtonId(txnId, index, isPos)) // ★ index — pos БИШ
+          .setCustomId(encodeButtonId(txnId, id, isPos)) // ★ тогтмол id
           .setLabel(category)
           .setStyle(ButtonStyle.Secondary)
       );

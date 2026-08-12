@@ -1,16 +1,16 @@
 // ============================================================
 //  test/category-filter.test.js — buildButtonRows нь гүйлгээний ТӨРЛӨӨР
-//  шүүх ба ★ ЖИНХЭНЭ ИНДЕКСИЙГ хадгалахыг шалгана.
+//  шүүх ба товч бүр ЗӨВ ангилал руу задрахыг шалгана.
 //
 //  Энэ нь config-ийн туслах функцийн БИШ, БОДИТ builder-ийн (discord.js
 //  component) гаралт дээрх тест — customId-г задлаад ангиллын нэр рүү
-//  буцаана. Индексийн урхинд унасан бол ЭНД баригдана.
+//  буцаана (тогтмол id-ээр).
 // ============================================================
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildButtonRows, buildComponentsFor } from '../notify.js';
-import { categoryByIndex, parseId } from '../categories.js';
+import { categoryById, parseId } from '../categories.js';
 
 /** builder-ийн эгнээнүүдээс [{label, decoded}] гаргана */
 function decodeRows(rows) {
@@ -19,7 +19,7 @@ function decodeRows(rows) {
     for (const comp of row.components) {
       const json = comp.toJSON();
       const p = parseId(json.custom_id);
-      out.push({ label: json.label, decoded: categoryByIndex(p.catIdx) });
+      out.push({ label: json.label, decoded: categoryById(p.catId) });
     }
   }
   return out;
@@ -36,11 +36,11 @@ test('ОРЛОГО: зөвхөн 3 товч (Орлого / Шилжүүлэг /
   assert.deepEqual(btns.map((b) => b.label), ['Орлого', 'Шилжүүлэг & гэр бүл', 'Бусад']);
 });
 
-test('★ Товч бүрийн ШОШГО = задарсан АНГИЛАЛ (индекс шилжээгүй)', () => {
+test('★ Товч бүрийн ШОШГО = задарсан АНГИЛАЛ (id зөв кодлогдсон)', () => {
   for (const type of ['expense', 'income', null]) {
     for (const b of decodeRows(buildButtonRows(42, false, type))) {
       assert.equal(b.decoded, b.label,
-        `${type}: "${b.label}" товч "${b.decoded}" болж задарлаа — ИНДЕКС ШИЛЖСЭН`);
+        `${type}: "${b.label}" товч "${b.decoded}" болж задарлаа`);
     }
   }
 });

@@ -8,6 +8,12 @@
 //
 //  categorize() дараалал: override → Орлого(type) → keyword → null(pending).
 //  "Бусад" нь зөвхөн хэрэглэгч баталгаажуулахдаа сонгосон үед оноогдоно.
+//
+//  ★ ТОГТМОЛ id (019 refactor): ангилал бүр `CATEGORY_META[...].id` дээр богино
+//  ASCII түлхүүртэй. Discord/Telegram нь товчны payload дотор ЭНЭ id-г дамжуулна
+//  (өмнө нь массив дахь ИНДЕКС байсан). Тиймээс CATEGORIES-ийн дараалал өөрчлөгдөх/
+//  дунд нь шинэ ангилал орох нь одоо болзошгүй БИШ — аюулгүй. Ангиллын нэр (label)
+//  нь DB-д хадгалагдсан хэвээр; id нь ЗӨВХӨН payload-ын кодлол.
 // ============================================================
 
 // Бүх 10 ангилал (dropdown, валидаци, AI prompt-д). Дараалал хадгалагдсан.
@@ -24,21 +30,78 @@ export const CATEGORIES = [
   'Бусад',
 ];
 
-// Ангилал бүрийн харагдах metadata (emoji + hex) — ★ single source.
+// Ангилал бүрийн metadata (★ ТОГТМОЛ id + emoji + hex) — ★ single source.
 // Backend болон dashboard хоёул эндээс авна (format.js импортолдог) — нэрийг
 // хоёр газар давхар бичихгүй. Зөвхөн канон 10 ангилал; танигдаагүйд default.
+//
+// ⚠️ `id` нь ТОГТМОЛ ГЭРЭЭ (bot-ын товчны payload-д кодлогдоно):
+//   • ХЭЗЭЭ Ч бүү өөрчил/дахин ашигла — өөрчилбөл нислэг дунд байгаа бүх мэдэгдэл
+//     тухайн ангиллаа алдана (fail-safe тул буруу ангилахгүй, зүгээр хуучирна).
+//   • Богино ASCII байх ёстой: Telegram callback_data 64 БАЙТ, Discord customId
+//     100 тэмдэгтийн ХАТУУ хязгаартай бөгөөд payload-д txnId зэрэг бусад талбар
+//     аль хэдийн орсон байдаг.
+//   • ЦЭВЭР ТОО байж БОЛОХГҮЙ — хуучин (индексээр кодлогдсон) payload-ыг ялгаж
+//     таних чадвар яг үүн дээр тогтдог (доорх ID_TO_CATEGORY-ийн тайлбарыг үз).
 export const CATEGORY_META = {
-  'Гадуур хооллолт':            { emoji: '🍽️', hex: '#E8703A' },
-  'Хүнсний зүйл':               { emoji: '🛒', hex: '#4F9D69' },
-  'Тээвэр':                     { emoji: '🚗', hex: '#E0A33E' },
-  'Орлого':                     { emoji: '💰', hex: '#2E9E5B' },
-  'Шилжүүлэг & гэр бүл':       { emoji: '💸', hex: '#C2698F' },
-  'Захиалга & сервис':          { emoji: '📱', hex: '#3FA9A0' },
-  'Боловсрол':                   { emoji: '📚', hex: '#5566B5' },
-  'Чөлөөт цаг / зугаа цэнгэл':  { emoji: '🎬', hex: '#8B6FB8' },
-  'Хувцас / гоо сайхан':       { emoji: '👕', hex: '#D86A92' },
-  'Бусад':                       { emoji: '📦', hex: '#8A8275' },
+  'Гадуур хооллолт':            { id: 'dining',    emoji: '🍽️', hex: '#E8703A' },
+  'Хүнсний зүйл':               { id: 'grocery',   emoji: '🛒', hex: '#4F9D69' },
+  'Тээвэр':                     { id: 'transport', emoji: '🚗', hex: '#E0A33E' },
+  'Орлого':                     { id: 'income',    emoji: '💰', hex: '#2E9E5B' },
+  'Шилжүүлэг & гэр бүл':       { id: 'transfer',  emoji: '💸', hex: '#C2698F' },
+  'Захиалга & сервис':          { id: 'subs',      emoji: '📱', hex: '#3FA9A0' },
+  'Боловсрол':                   { id: 'edu',       emoji: '📚', hex: '#5566B5' },
+  'Чөлөөт цаг / зугаа цэнгэл':  { id: 'leisure',   emoji: '🎬', hex: '#8B6FB8' },
+  'Хувцас / гоо сайхан':       { id: 'apparel',   emoji: '👕', hex: '#D86A92' },
+  'Бусад':                       { id: 'other',     emoji: '📦', hex: '#8A8275' },
 };
+
+// ---- id ↔ ангилал хос (★ Map — байрлалын таамаглал ОГТ ОРООГҮЙ) ----
+// Модуль ачаалагдахад НЭГ УДАА бүтээгдэнэ. Map сонгосон шалтгаан: энгийн объект
+// байсан бол `byId('constructor')` мэтийн prototype-ын түлхүүр утга буцаах эрсдэлтэй.
+const ID_TO_CATEGORY = new Map();
+const CATEGORY_TO_ID = new Map();
+for (const category of CATEGORIES) {
+  const id = CATEGORY_META[category]?.id;
+  // Хөгжүүлэлтийн алдааг ЧИМЭЭГҮЙ өнгөрөөхгүй: id-гүй ангилал bot дээр товч болж
+  // кодлогдох боломжгүй тул модуль ачаалахдаа шууд унана (код дээрх алдаа —
+  // ажиллах үеийн өгөгдлөөс ХАМААРАХГҮЙ, тиймээс тест дээр л баригдана).
+  if (typeof id !== 'string' || !id) {
+    throw new Error(`config/categories.js: "${category}" ангилалд тогтмол id алга`);
+  }
+  if (ID_TO_CATEGORY.has(id)) {
+    throw new Error(`config/categories.js: id давхардсан — "${id}"`);
+  }
+  ID_TO_CATEGORY.set(id, category);
+  CATEGORY_TO_ID.set(category, id);
+}
+
+/**
+ * ★ Тогтмол id → ангиллын нэр. Танихгүй бол `null` (ХЭЗЭЭ Ч таамаглахгүй).
+ *
+ * ⚠️ FAIL-SAFE: энэ функц массив руу ИНДЕКСЛЭХГҮЙ. Хуучин (deploy-ийн ӨМНӨ
+ * илгээгдсэн) мэдэгдлийн товч нь индексээр кодлогдсон — тэнд `"4"` гэх ЦЭВЭР ТОО
+ * ирнэ. Бүх id нь үсгэн (тоо БИШ) тул Map-д огт олдохгүй → `null` буцна →
+ * дуудагч bot "мэдэгдэл хуучирсан" гэж эелдэг унана. Хэрэв энд `CATEGORIES[id]`
+ * гэсэн fallback байсан бол хуучин товч ЧИМЭЭГҮЙ БУРУУ ангилал бичих байсан
+ * (applyToAll нь мерчантын БҮХ түүхэнд тараана).
+ *
+ * @param {string} id
+ * @returns {string|null}
+ */
+export function byId(id) {
+  if (typeof id !== 'string') return null;
+  return ID_TO_CATEGORY.get(id) ?? null;
+}
+
+/**
+ * Ангиллын нэр → тогтмол id (танихгүй нэр → `null`).
+ * @param {string} category
+ * @returns {string|null}
+ */
+export function idFor(category) {
+  if (typeof category !== 'string') return null;
+  return CATEGORY_TO_ID.get(category) ?? null;
+}
 
 // ---- Ангиллын ХАМААРАЛ (applicability): аль төрлийн гүйлгээнд утгатай вэ ----
 // ★ single source. Гурван клиент (Dashboard/Discord/Telegram) БА API хоёул эндээс
@@ -50,8 +113,8 @@ export const CATEGORY_META = {
 //   • 'Бусад' — хэрэглэгчийн ГАРААР сонгох гарц; хэзээ ч автоматаар оногдохгүй
 //     (categorize.js буцаахгүй) тул хоёуланд нээлттэй байх ёстой.
 //
-// ⚠️ CATEGORIES (жирийн мөрийн массив) БА CATEGORY_META-г ХЭВЭЭР үлдээв — bot-ууд
-//    ангиллыг CATEGORIES дахь ИНДЕКСЭЭР кодолдог тул дараалал ариун (§ notify.js).
+// ⚠️ Түлхүүр нь ангиллын НЭР (label) — DB-д хадгалагддаг яг тэр утга. Тогтмол
+//    id нь CATEGORY_META дээр амьдардаг (энд давхардуулахгүй).
 export const CATEGORY_APPLICABILITY = {
   'Гадуур хооллолт':            ['expense'],
   'Хүнсний зүйл':               ['expense'],
@@ -88,8 +151,7 @@ export function isCategoryAllowedFor(category, type) {
 
 /**
  * Тухайн төрөлд тохирох ангиллын жагсаалт (дараалал ХАДГАЛАГДАНА).
- * ⚠️ Bot-ууд ЭНЭ функцийг индекс кодлоход ШУУД ашиглаж БОЛОХГҮЙ — индекс
- * шилжинэ. Тэнд listCategoriesWithIndexFor()-г ашиглана.
+ * Нэрээр кодлодог UI (dashboard-ийн chip, Discord-ийн засварын select) энийг авна.
  * @param {'income'|'expense'|null|undefined} type
  */
 export function categoriesFor(type) {
@@ -97,21 +159,20 @@ export function categoriesFor(type) {
 }
 
 /**
- * ★ Bot-уудад ЗОРИУЛСАН: { category, index } хосууд — index нь БҮТЭН CATEGORIES
- * массив дахь ЖИНХЭНЭ байрлал (шүүлтийн дараах байрлал БИШ).
+ * ★ Bot-уудад ЗОРИУЛСАН: { category, id } хосууд, дараалал ХАДГАЛАГДАНА.
  *
- * ⚠️ Discord/Telegram нь сонгосон ангиллыг customId/callback_data дотор ИНДЕКСЭЭР
- * дамжуулж, CATEGORIES[idx]-ээр задалдаг. Хэрэв шүүсэн массивын шинэ индексийг
- * кодловол товч бүр БУРУУ ангилал илгээнэ (алдаа мэдэгдэхгүй, applyToAll нь
- * мерчантын бүх түүхэнд тараана). Тиймээс index-ийг ЭНД хамт буцаана.
+ * Discord/Telegram нь товчны payload дотор ЭНЭ `id`-г дамжуулж, `byId()`-ээр
+ * задална. Массив дахь байрлал (index) ХААНА Ч кодлогдохгүй тул CATEGORIES-ийн
+ * дараалал өөрчлөгдөх/шинэ ангилал дунд нь орох нь одоо БҮРЭН аюулгүй —
+ * давталтын байрлалыг зөвхөн эгнээ таслахад ашиглана.
  *
  * @param {'income'|'expense'|null|undefined} type
- * @returns {Array<{category: string, index: number}>}
+ * @returns {Array<{category: string, id: string}>}
  */
-export function listCategoriesWithIndexFor(type) {
+export function listCategoriesWithIdFor(type) {
   return CATEGORIES
-    .map((category, index) => ({ category, index }))
-    .filter(({ category }) => isCategoryAllowedFor(category, type));
+    .filter((category) => isCategoryAllowedFor(category, type))
+    .map((category) => ({ category, id: CATEGORY_TO_ID.get(category) }));
 }
 
 // type==='income' үед автоматаар оногдох ангилал
@@ -211,6 +272,6 @@ export const OLD_TO_NEW = {
 
 export default {
   CATEGORIES, CATEGORY_META, CATEGORY_RULES, matchByKeywords,
-  CATEGORY_APPLICABILITY, isCategoryAllowedFor, categoriesFor, listCategoriesWithIndexFor,
-  INCOME_CATEGORY, DEFAULT_CATEGORY, OLD_TO_NEW,
+  CATEGORY_APPLICABILITY, isCategoryAllowedFor, categoriesFor, listCategoriesWithIdFor,
+  byId, idFor, INCOME_CATEGORY, DEFAULT_CATEGORY, OLD_TO_NEW,
 };

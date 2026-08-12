@@ -8,7 +8,7 @@ import { createAi } from '../api/ai.js';
 import { hashPasswordSync } from '../api/auth/passwordHash.js';
 // Discord давхаргын цэвэр логик (discord config/token шаардахгүй):
 import { buildComponentsFor, buildEditRow } from '../discord/notify.js';
-import { encodeEditButtonId, encodeCatSelectId, parseId } from '../discord/categories.js';
+import { encodeEditButtonId, encodeCatSelectId, parseId, categoryById } from '../discord/categories.js';
 import { CATEGORIES } from '../config/categories.js';
 
 const API_KEY = 'edit-verify-key';
@@ -19,7 +19,11 @@ const app = createApp({ db, ai: createAi({ enabled: false }), apiKey: API_KEY, j
 const server = app.listen(0);
 const base = `http://127.0.0.1:${server.address().port}`;
 const H = { 'Content-Type': 'application/json', 'X-API-Key': API_KEY };
-const post = async (b) => (await fetch(base + '/api/transactions', { method: 'POST', headers: H, body: JSON.stringify(b) })).json();
+// ⚠️ Machine (X-API-Key) push-д userId ЗААВАЛ — owner fallback БАЙХГҮЙ (§5).
+// (Энэ скрипт multi-tenant ingest гарснаас хойш userId-гүй байсан тул [B]-ээс
+// цааш унадаг байсныг зассан — id-ийн refactor-той хамааралгүй.)
+const OWNER_ID = db.getOwnerUserId();
+const post = async (b) => (await fetch(base + '/api/transactions', { method: 'POST', headers: H, body: JSON.stringify({ userId: OWNER_ID, ...b }) })).json();
 const get = async (id) => { const r = await fetch(base + `/api/transactions/${id}`, { headers: H }); return { status: r.status, json: await r.json() }; };
 const patchCat = async (id, b) => (await fetch(base + `/api/transactions/${id}/category`, { method: 'PATCH', headers: H, body: JSON.stringify(b) })).json();
 const overrides = async () => (await fetch(base + '/api/overrides', { headers: H })).json();
@@ -32,10 +36,15 @@ try {
   console.log('\n[A] customId encode/parse + component логик');
   assert.deepStrictEqual(parseId(encodeEditButtonId(42)), { kind: 'e', txnId: 42 });
   assert.deepStrictEqual(parseId(encodeCatSelectId(42, '99887766')), { kind: 'es', txnId: 42, messageId: '99887766' });
-  // Хуучин 'c'/'m' формат эвдрээгүй
-  assert.strictEqual(parseId('c|7|3|1').kind, 'c');
-  assert.strictEqual(parseId('m|7|3|1|123').kind, 'm');
-  ok("parseId 'e'/'es'-г зөв задална, 'c'/'m' эвдрээгүй");
+  // 'c'/'m' формат — ангилал нь ТОГТМОЛ id-ээр (019)
+  assert.strictEqual(parseId('c|7|dining|1').kind, 'c');
+  assert.strictEqual(categoryById(parseId('c|7|dining|1').catId), 'Гадуур хооллолт');
+  assert.strictEqual(parseId('m|7|dining|1|123').kind, 'm');
+  ok("parseId 'e'/'es'-г зөв задална, 'c'/'m' нь id-ээр задарна");
+  // ★ Нислэг дунд байгаа ХУУЧИН (индекс) payload → null (буруу ангилал БИШ)
+  assert.strictEqual(categoryById(parseId('c|7|3|1').catId), null);
+  assert.strictEqual(categoryById(parseId('m|7|3|1|123').catId), null);
+  ok('Хуучин индекс-payload → null (fail-safe, чимээгүй буруу бичилт БАЙХГҮЙ)');
 
   // classified → "Ангилал засах" товч (1 эгнээ, customId 'e|..')
   const classifiedComp = buildComponentsFor({ id: 5, status: 'classified', category: 'Хүнсний зүйл', is_pos: 1 });
@@ -94,9 +103,13 @@ try {
   console.log('\n[D] Unchanged → бичихгүй (bot select-submit логик)');
   const bot = readFileSync(new URL('../discord/bot.js', import.meta.url), 'utf8');
   assert.match(bot, /current\.category === chosen[\s\S]{0,200}Өөрчлөлтгүй/, 'сонгосон нь одоогийнхтой ижил бол бичихгүй');
-  assert.match(bot, /isStringSelectMenu[\s\S]*?deferUpdate[\s\S]*?patchCategory/, 'select: deferUpdate (ack) → дараа нь API');
+  // ⚠️ Урсгал өөрчлөгдсөн (§9): select → deferUpdate → applyToAll баталгаажуулалт
+  // (pendingConfirm) → ЗӨВХӨН 'ay'/'an' handler-т patchCategory. Тиймээс энд
+  // pendingConfirm.set хүртэлх дарааллыг шалгана (өмнөх регекс хуучирсан байсан).
+  assert.match(bot, /isStringSelectMenu[\s\S]*?deferUpdate[\s\S]*?pendingConfirm\.set/, 'select: deferUpdate (ack) → дараа нь баталгаажуулалт');
+  assert.match(bot, /kind === 'ay' \|\| p\.kind === 'an'[\s\S]*?patchCategory/, "бичилт нь ГАГЦХҮҮ 'ay'/'an' handler-т");
   ok('Сонгосон ангилал = одоогийнх бол PATCH дуудахгүй (unchanged хамгаалагдсан)');
-  ok('Select submit: deferUpdate (3с ack) → дараа нь patchCategory');
+  ok('Select submit: deferUpdate (3с ack) → applyToAll баталгаажуулалт → patchCategory');
 
   // ---------- [E] Scope guard: amount/description edit endpoint НЭМЭГДЭЭГҮЙ ----------
   console.log('\n[E] Scope: amount/description edit нэмэгдээгүй (category-only)');
