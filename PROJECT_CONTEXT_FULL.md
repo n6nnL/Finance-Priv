@@ -693,9 +693,9 @@ PATCH огт дуудагдахгүй → мөр `pending_review` хэвээр, 
 ## 15. Одоогийн төлөв (2026-08-12)
 
 - Серверт 4 pm2 процесс online, домейн амьд.
-- **★ СҮҮЛИЙН АЖИЛ — BOT-ЫН PAYLOAD ТОГТМОЛ ID БОЛОВ (019, ⏸ DEPLOY ХИЙГЭЭГҮЙ —
-  Tuguldur-ийн зөвшөөрөл хүлээж байна). МИГРАЦ БАЙХГҮЙ — schema огт хөндөөгүй,
-  DB-д бичигдэх утга ӨӨРЧЛӨГДӨӨГҮЙ:** Discord/Telegram нь ангиллыг товчны payload
+- **★ СҮҮЛИЙН АЖИЛ — BOT-ЫН PAYLOAD ТОГТМОЛ ID БОЛОВ (019, ✅ СЕРВЕРТ ГАРСАН
+  2026-08-12, commit `a2c6c46` — ⏳ АМЬД ТАПЫН ШАЛГАЛТ ХҮЛЭЭГДЭЖ БАЙНА, доороос үз).
+  МИГРАЦ БАЙХГҮЙ — schema огт хөндөөгүй, DB-д бичигдэх утга ӨӨРЧЛӨГДӨӨГҮЙ:** Discord/Telegram нь ангиллыг товчны payload
   дотор `CATEGORIES` массив дахь **ИНДЕКСЭЭР** дамжуулдаг байсныг **ТОГТМОЛ
   string id**-ээр солив (`dining`/`grocery`/`transport`/`income`/`transfer`/`subs`/
   `edu`/`leisure`/`apparel`/`other`). Энэ бол **зан төлөв ИЖИЛ, цэвэр refactor** —
@@ -723,6 +723,20 @@ PATCH огт дуудагдахгүй → мөр `pending_review` хэвээр, 
   Дашрамд: `scripts/discord-edit.verify.mjs` нь multi-tenant ingest гарснаас хойш
   `userId`-гүй POST-оор [B]-ээс цааш **унадаг байсныг** (энэ refactor-той хамааралгүй,
   өмнөх ажлын хоцрогдол) зассан.
+  **DEPLOY (2026-08-12):** `git pull --ff-only` (a55c94a→a2c6c46) + `pm2 reload
+  bank-discord` ба `bank-telegram` **тус тусад нь** (§10-ийн gotcha). `bank-api` /
+  `bank-listener` ХӨНДӨӨГҮЙ (5D uptime хэвээр), DB backup хийгээгүй (миграцгүй),
+  dashboard `dist` дахин build хийгээгүй. Хоёр bot `online`, restart тоолуур
+  9→10 / 11→12 (нэг л удаа, өсөөгүй), лог цэвэр (`Discord bot нэвтэрлээ`,
+  `Telegram bot эхэллээ (long polling)`).
+  Серверийн БОДИТ кодон дээр `node --test` = **309/309 ногоон** ба
+  `scripts/category-id.verify.mjs` = **9/9 PASS** (`:memory:` DB, production
+  өгөгдөл хөндөөгүй) — товчны шошго = DB-д бичигдэх ангилал, хуучин payload → null.
+  ⏳ **ҮЛДСЭН ШАЛГАЛТ (хүн таплах шаардлагатай):** deploy-ийн үед production-д
+  `pending_review` мөр **0** байсан тул (а) шинэ pending гүйлгээн дээр
+  pending→confirm тап, (б) deploy-ийн ӨМНӨ илгээгдсэн хуучин мэдэгдэл дээрх тап
+  («хуучирсан» хариу + мөр хөндөгдөхгүй) хоёр хараахан хийгдээгүй.
+  Эдгээр батлагдсаны дараа энэ мөрийг «бүрэн баталгаажсан» болгож шинэчилнэ.
 - Calendar/Telegram холбогдоогүй. Telegram bot ажиллаж байна.
 - AI ангилал **унтраалттай** (`AI_CATEGORIZATION_ENABLED=false`) — credit байхгүй. Асаахад
   танигдаагүй мерчантад санал өгнө; унтраалттай үед зүгээр pending_review болно.

@@ -113,6 +113,11 @@ ssh -i "$DEPLOY_SSH_KEY" "$DEPLOY_USER@$DEPLOY_HOST" \
   дутуу бол process шууд унтрана (pm2 restart loop).
 - **Discord/Telegram/listener restart нь `pm2 reload all`-д багтана**, гэхдээ зөвхөн UI
   өөрчлөлтөд тэдгээрийг restart хийх шаардлагагүй.
+- ⚠️ **`pm2 reload A B` нь ЗӨВХӨН ЭХНИЙХИЙГ нь reload хийдэг** (энэ серверийн pm2
+  хувилбар дээр батлагдсан — 019 deploy). Хоёр процессыг **тус тусад нь** дуудна:
+  `pm2 reload bank-discord; pm2 reload bank-telegram`. Дараа нь `pm2 status`-аар
+  **хоёуланд нь** uptime тэглэгдсэн эсэхийг ЗААВАЛ шалга — эс бөгөөс хагас deploy
+  (нэг bot шинэ код, нөгөө нь хуучин) чимээгүй үлдэнэ.
 - **API + listener-ийг ХАМТ deploy хий** — шинэ API (`userId` заавал ingest-д) хуучин listener-ийн
   (userId-гүй) push-ийг 400-аар reject хийнэ.
 
