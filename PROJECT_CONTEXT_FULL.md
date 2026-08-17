@@ -281,7 +281,30 @@ Balance = валют тус бүрээр тэмдэгт нийлбэр — **bac
 | GET | `/debt-ledger/balances` | **Хүн × валют** тус бүрийн цэвэр үлдэгдэл (зөвхөн `open`). `[{counterparty, currency, net, direction}]` — `net>0` = тэр хүн ХЭРЭГЛЭГЧИД өртэй. Тэг болж цэвэршсэн хосыг буцаахгүй |
 | POST | `/debt-ledger` | `{counterparty, direction:'i_lent'\|'i_borrowed', amount>0, currency:'MNT'\|'EUR', entryDate, note?, linkedTransactionId?, exclusionShare?}`. Холбоос өгвөл тэр гүйлгээнээс **ЭНЭ бичлэгийн хувь хэмжээг** (`exclusionShare ?? amount`) **атомоор** төсвөөс хасна |
 | PATCH | `/debt-ledger/:id` | Засах / хаах (`{status:'settled', settledTransactionId?}`) / дахин нээх / **`exclusionShare` засах**. Холбоос солих/салгах/хувь хэмжээ өөрчлөгдөх бүрд хөндөгдсөн БҮХ гүйлгээний хасалт дахин тооцоологдоно |
-| DELETE | `/debt-ledger/:id` | Устгах + хөндөгдсөн гүйлгээг дахин тооцоолно (зөвхөн энэ бичлэгийн хувь хэмжээ чөлөөлөгдөнө) |
+| POST | `/debt-ledger/:id/repay` | **ХЭСЭГЧИЛСЭН БУЦААЛТ (019).** `{amount>0, entryDate, note?, linkedTransactionId?, exclusionShare?}`. Эх бичлэгийг ЗАСАХГҮЙ — **эсрэг `direction`-той ТУСДАА эвент** үүсгэнэ (`repays_entry_id` = эх id). `counterparty`/`currency` нь эх бичлэгээс **өвлөгдөнө** (өөр хүн/валют руу буцаах боломжгүй). Хариу: `{entry, outstanding, balances}` |
+| DELETE | `/debt-ledger/:id` | Устгах + хөндөгдсөн гүйлгээг дахин тооцоолно (зөвхөн энэ бичлэгийн хувь хэмжээ чөлөөлөгдөнө). **019:** ЭХ бичлэг уствал түүний буцаалтууд **ХАМТ устана** (өнчин эвент үлдвэл үлдэгдлийг ХУДАЛ сөрөг болгоно) |
+
+⚠️ **БУЦААЛТЫН ЗАГВАР (019) — netting, mutation БИШ.** "Мөнх-од 50,000₮ өртэй" дээр
+20,000₮ буцаахад эх мөрийн `amount` ХЭВЭЭР 50,000 үлдэж, −20,000-ын шинэ эвент нэмэгдэнэ;
+үлдэгдэл нь бүх эвентийн **тэмдэгтэй нийлбэр** (30,000₮). Түүхэнд ХОЁУЛАА харагдана.
+`GET /debt-ledger` нь мөр бүрт `repaid` (нээлттэй буцаалтуудын нийлбэр) ба `outstanding`
+(`amount − repaid`) нэмж буцаана; буцаалтын эвент дээр хоёулаа **0**.
+Алдаа: `OVER_REPAYMENT` (үлдэгдлээс их), `ALREADY_SETTLED` (хаагдсан өр дээр),
+`NOT_AN_ENTRY` (буцаалт руу дахин буцаалт) — бүгд **400**; эх бичлэг олдохгүй бол **404**.
+
+⚠️ **"Хаах" (settle) нь буцаалтууд руугаа ЗААВАЛ дамжина.** Эс бөгөөс эх мөр
+`settled` болж үлдэгдлээс гарахад −20,000-ын буцаалт **нээлттэй үлдэж** цэвэр
+үлдэгдэл **−20,000** буюу "та тэр хүнд өртэй" гэсэн ХУДАЛ дүн гарна. `updateDebtEntry()`
+нь `status` солигдоход `repays_entry_id = :id` бүх хүүхдийг мөн адил `settled`/`open`
+болгоно (нэг транзакцид). Буцаалтгүй бичлэгийн зан төлөв 015-тай **ЯГ ИЖИЛ** хэвээр.
+
+⚠️ **ОРЛОГЫН АВТОМАТ ХАСАЛТ (019-ийн гол зорилго).** Банкаар ирсэн буцаалтыг
+`linkedTransactionId`-аар холбоход тэр **ОРЛОГЫН** гүйлгээ `excluded_from_budget=1`,
+`manually_edited=1` болж сарын орлого **хиймлээр өсөхгүй**. Механизм нь 015/016-гийн
+хасалттай ЯГ ИЖИЛ (`NET_AMOUNT` + `excluded_from_budget=0` шүүлт нь `type='income'`
+мөрөнд адилхан үйлчилдэг тул ШИНЭ КОД шаардаагүй). Бэлнээр буцаах = холбоосгүй эвент,
+**БҮРЭН ХҮЧИНТЭЙ**. Устгах/салгахад хасалт **буцна** (`excluded_from_budget=0`) — гэхдээ
+ӨӨР бичлэг тэр гүйлгээг лавлаж байвал түүний хувь **ҮЛДЭНЭ** (reference count).
 
 ⚠️ **Олон бичлэг = НИЙЛБЭР (016).** Нэг гүйлгээг олон өрийн бичлэг лавлаж болно
 (90,000₮ хоолны данс: Болд 30к + Гана 25к). Гүйлгээний `excluded_amount` = холбогдсон
@@ -324,9 +347,9 @@ Balance = валют тус бүрээр тэмдэгт нийлбэр — **bac
 | `telegram_link_codes` | `code PK, user_id, expires_at, used` |
 | `telegram_notifications` | `(transaction_id, chat_id) PK, message_id` |
 | `manual_ledger_entries` | `user_id, entry_date, type, amount, currency, amount_eur, exchange_rate, note` |
-| `debt_ledger` | `user_id, counterparty, direction ('i_lent'\|'i_borrowed'), amount (CHECK>0), currency ('MNT'\|'EUR'), entry_date, note, status ('open'\|'settled'), linked_transaction_id (→transactions, ON DELETE SET NULL), settled_transaction_id (мөн адил), **exclusion_share** (REAL NULL — холбосон гүйлгээнээс эзлэх хэсэг; NULL = `amount`), created_at, settled_at` |
+| `debt_ledger` | `user_id, counterparty, direction ('i_lent'\|'i_borrowed'), amount (CHECK>0), currency ('MNT'\|'EUR'), entry_date, note, status ('open'\|'settled'), linked_transaction_id (→transactions, ON DELETE SET NULL), settled_transaction_id (мөн адил), **exclusion_share** (REAL NULL — холбосон гүйлгээнээс эзлэх хэсэг; NULL = `amount`), **repays_entry_id** (INTEGER NULL → debt_ledger.id — 019: буцаалтын эвент АЛЬ өрийг барагдуулж буй нь; NULL = энгийн зээл/зээллэг), created_at, settled_at` |
 
-**Миграцын түүх (18):** 001–004 үндсэн + dashboard/AI/note · **005** auth+multi-tenant
+**Миграцын түүх (19):** 001–004 үндсэн + dashboard/AI/note · **005** auth+multi-tenant
 (`user_id` бүх хүснэгтэд, `category_overrides`-г table-rebuild хийсэн) · 006 settings+events ·
 007 google_sub/picture + google_tokens · 008 budget_allocations · 009 Gmail multi-tenant
 баганууд + **token encryption backfill** · 010 Telegram хүснэгтүүд · 011 `gmail_oauth_client`
@@ -352,11 +375,22 @@ balanceHistory.js / `/balance-history` бүгд түүнд тулгуурлад�
 (хоёул `TEXT`, nullable, DEFAULT NULL, **backfill ХИЙХГҮЙ** — 012/017-тэй ижил
 философи, одоо байгаа БҮХ мөр NULL хэвээр). Хадгалагдах утга нь **МОНГОЛ LABEL**
 (ангиллынхтай ЯГ ИЖИЛ гэрээ — id ХЭЗЭЭ Ч DB-д орохгүй).
+**019** ХЭСЭГЧИЛСЭН БУЦААЛТ: `debt_ledger.repays_entry_id`
+(`INTEGER NULL REFERENCES debt_ledger(id) ON DELETE SET NULL`) + `idx_debt_ledger_repays`.
+Additive, nullable, DEFAULT NULL, **backfill ХИЙХГҮЙ** — хуучин БҮХ мөр NULL
+(= энгийн зээл/зээллэг) хэвээр. Буцаах нь баганыг орхих/устгахтай тэнцүү.
+⚠️ **ЯАГААД `direction`-д "repayment" гэсэн ШИНЭ УТГА НЭМЭЭГҮЙ вэ:** тэр баганын
+`CHECK (direction IN ('i_lent','i_borrowed'))` нь `CREATE TABLE` дотор шатсан бөгөөд
+SQLite-д CHECK өргөтгөх ганц зам нь **12 алхамт table rebuild** (additive БИШ,
+өгөгдөлд эрсдэлтэй). Буцаалт нь netting-ийн хувьд эх бичлэгийн **ЭСРЭГ direction**-той
+эвенттэй ЯГ ижил утгатай тул `getDebtBalances()`-ийн query **ӨӨРЧЛӨГДӨХГҮЙГЭЭР** зөв
+ажиллана: `+50,000 (i_lent) + −20,000 (i_borrowed) = 30,000`. ·
+
 ⚠️ **ДУГААРЛАЛТЫН ТӨӨРӨГДӨЛ:** §15-д "016/017/**018**/**019**" гэж бичигдсэн
 зарим тэмдэглэгээ нь **ФИЧЕРИЙН БАГЦЫН шошго** — applicability (§8.1) ба тогтмол id
-(§14) хоёр нь миграц ОГТ НЭМЭЭГҮЙ. Тиймээс миграцын гинж 017-оос шууд **018**
-(дэд ангилал) руу үргэлжилнэ. Дараагийн миграцын дугаарыг ҮРГЭЛЖ `api/db.js`-ийн
-`migrate()`-ээс уншина, баримтаас БИШ.
+(§14) хоёр нь миграц ОГТ НЭМЭЭГҮЙ. Тиймээс миграцын гинж 017 → **018** (дэд ангилал)
+→ **019** (хэсэгчилсэн буцаалт) гэж үргэлжилнэ. Дараагийн миграцын дугаарыг ҮРГЭЛЖ
+`api/db.js`-ийн `migrate()`-ээс уншина, баримтаас БИШ.
 
 PRAGMA: `journal_mode=WAL`, `synchronous=NORMAL`, `foreign_keys=ON`.
 WAL нь **олон процесс** (api + listener + 2 bot) нэг файлыг зэрэг ашиглах боломж өгдөг.
@@ -606,21 +640,21 @@ Discord / Telegram / Website гурвуулан **ижил чадвартай**.
 
 ---
 
-## 12. Тест (нийт **339**, бүгд `node --test`)
+## 12. Тест (нийт **371**, бүгд `node --test`)
 
 ⚠️ Root дээрх `npm test` (= `node --test`) нь **recursive** тул доорх БҮХ багцыг
-(api/telegram/discord/dashboard оруулаад) нэг дор ажиллуулж **339** гэж мэдээлдэг.
+(api/telegram/discord/dashboard оруулаад) нэг дор ажиллуулж **371** гэж мэдээлдэг.
 Багц бүрийг тусад нь ажиллуулах командыг баруун баганад бичив.
 ⚠️ Git Bash дээр `node --test test/` нь заримдаа "MODULE_NOT_FOUND" өгдөг —
 `node --test test/*.test.js` гэж glob-оор бичвэл найдвартай.
 
 | Багц | Тоо | Ажиллуулах |
 |---|---|---|
-| API | **197** (api 12, auto-classify 3, balance-history 18, balance 6, budget-status 12, budget 8, **category-applicability 11**, dashboard 17, **debt-ledger 19**, gmail-auth 12, google-auth 11, google-provider 3, manual-savings 16, **partial-exclusion 12**, **email-received-at 6**, **subcategory 18**, telegram 6, token-crypto 7) | `cd api && npm test` |
+| API | **223** (api 12, auto-classify 3, balance-history 18, balance 6, budget-status 12, budget 8, **category-applicability 11**, dashboard 17, **debt-ledger 19**, **debt-repayment 26**, gmail-auth 12, google-auth 11, google-provider 3, manual-savings 16, **partial-exclusion 12**, **email-received-at 6**, **subcategory 18**, telegram 6, token-crypto 7) | `cd api && npm test` |
 | Дундын (`test/`) | **70** (golomt 12, categorize 10, shared 4, transactionActions 7, **emailReceivedAt 5**, **categoryApplicability 9**, **categoryStableId 6**, **categoryButtonId 6**, **subcategories 11**) | `node --test test/*.test.js` |
 | Listener модуль | **12** (accounts 4, manager 4, balanceAlert 4) | `node --test src/*.test.js` |
 | Telegram | **18** (db 10, isolation 2, **category-filter 6**) | `cd telegram && npm test` |
-| Dashboard цэвэр логик | **26** (budget 12, **debt 14**) | `node --test dashboard/src/lib/*.test.js` |
+| Dashboard цэвэр логик | **32** (budget 12, **debt 20**) | `node --test dashboard/src/lib/*.test.js` |
 | Discord | **16** (categories 6, **notify 3**, **category-filter 7**) | `cd discord && npm test` |
 
 Загвар: API тестүүд жинхэнэ `createApp()`-г `:memory:` DB дээр ачаалж, HTTP түвшинд шалгана
@@ -647,6 +681,21 @@ cross-user унших/засах/холбох бүгд татгалзагдан�
 DB trigger/CHECK ч хэтрэлт/сөрөг дүнг зөвшөөрөхгүй · валют зөрөх холбоос → 400 ·
 isolation · **бодит "хуваасан хоол" хувилбар** (90к → Болд 30к + Гана 25к → цэвэр 35к →
 Гана салахад 60к, үлдэгдэл хоёуланд нь хөндөгдөөгүй).
+
+`debt-repayment.test.js` (019, 26) ★: **50,000 зээлүүлээд 20,000 буцаахад үлдэгдэл
+30,000 болж, эх мөрийн `amount` ЗАСАГДАХГҮЙ, түүхэнд ХОЁУЛАА харагдана** · олон удаагийн
+буцаалт хуримтлагдана · бүтэн буцаалт → `balances`-аас бүрмөсөн гарна · `i_borrowed`
+чиглэлд ч ажиллана · `OVER_REPAYMENT`/`ALREADY_SETTLED`/`NOT_AN_ENTRY` → 400 + rollback ·
+**хаах нь буцаалтууд руугаа дамжиж СӨРӨГ үлдэгдэл үүсэхгүй**, re-open-д үлдэгдэл ЯГ
+хэвээр сэргэнэ · буцаалтгүй бичлэгийн хаах/нээх 015-тай ЯГ ижил · **холбосон буцаалт →
+`/summary` БА `/analytics/by-category`-ийн `totalIncome`-оос гарч, `manually_edited=1`** ·
+бэлэн (холбоосгүй) буцаалт бүрэн хүчинтэй · валют зөрөх холбоос → 400, EUR өр MNT-ээр
+цэвэршихгүй · **устгахад хасалт буцна; ӨӨР бичлэг лавлаж байвал түүний хувь ҮЛДЭНЭ
+(reference count, хоёр салаа хоёулаа)** · un-link → хасалт буцна ч netting хэвээр ·
+эх бичлэг устахад буцаалтууд ХАМТ устана (өнчин үлдэхгүй) ·
+**★★ `/balance-history` нь холбосон буцаалтын өмнө/дараа БАЙТ ТУТМАА ИЖИЛ** (`res.text()`-ээр
+задлаагүй харьцуулна) + `/balance` `deepEqual` · хасагдсан орлого гүйлгээний жагсаалтад
+бүтэн дүнгээрээ хэвээр · cross-user буцаалт → 404, бусдын гүйлгээ рүү холбох → 400.
 
 `emailReceivedAt.test.js` + `email-received-at.test.js` + `discord/test/notify.test.js`
 (017): жинхэнэ `simpleParser`-ээр имэйл задалж `Date:` header → ISO UTC · header
@@ -772,14 +821,47 @@ PATCH огт дуудагдахгүй → мөр `pending_review` хэвээр, 
 | ⚠️ **019: ТОГТМОЛ id нь ГЭРЭЭ — бүү сольж/дахин ашигла** | `CATEGORY_META[c].id` нь client-д ИЛГЭЭГДСЭН мэдэгдлүүд дотор амьдардаг. Id-г **өөрчлөх** → тэр ангиллын хуучин товчнууд "хуучирсан" болно (аюулгүй ч эвгүй); id-г **дахин ашиглах** (өөр ангилалд өгөх) → нислэг дунд байгаа товч **БУРУУ ангилал** бичих цорын ганц зам — тиймээс ХЭЗЭЭ Ч бүү хий. Id нь **цэвэр тоо байж болохгүй**: хуучин индекс-payload-ыг ялгах чадвар яг үүн дээр тогтдог. Дутуу/давхардсан id → модуль ачаалахад throw (тестээр баригдана) |
 | ⚠️ **018: хуучин "хууль бус" мөрүүд** | Applicability нэмэгдэхээс ӨМНӨ үүссэн зөрчилтэй мөр (ж: `income` + `Тээвэр`) **ХЭВЭЭР үлдэнэ — миграц хийгээгүй** (зориуд). `catLabel/catEmoji/catHex` нь applicability үл харах тул жагсаалтад хэвийн харагдана. Ганц ялгаа: засварын panel-д тухайн утга сонголтын жагсаалтад байхгүй тул **идэвхтэй товч харагдахгүй** — хэрэглэгч зөвшөөрөгдсөн утга сонгож л засна |
 | ⚠️ **Override нь ЗӨВХӨН ingest дээр, тэр ч дутуу** | `classify.js` нь таарсан override-оос **ЗӨВХӨН `category`**-г авдаг — `friendly_name` (газрын нэр) ба `default_note` (шалтгаан) нь гүйлгээний мөрөнд **ХЭЗЭЭ Ч бичигддэггүй**. Тэдгээр нь зөвхөн УНШИХ үед `attachOverrideInfo()`-оор virtual-аар хавсрагдана (`friendly_name`/`override_note` талбар), эсвэл `applyToAll` баталгаажуулалтын АГШИНД `updateCategoryByPattern()` тухайн үед байсан мөрүүдэд бичнэ (мөн `manually_edited=1` тавина). Тиймээс override үүсэхээс ӨМНӨХ ч, ХОЙНОХ ч автомат мөрүүд газрын нэр/шалтгаангүй хоцордог → түүхэн мөрийг [`scripts/backfill-overrides.js`](scripts/backfill-overrides.js)-ээр эвлэрүүлнэ (§3.5). Backfill-ийн таарал нь ingest-тэйгээ ЯГ ИЖИЛ байх ЁСТОЙ, эс бөгөөс дараагийн ingest backfill-ийн тавьсныг эргүүлж дарна |
+| ⚠️ **019: буцаалт нь ЭВЕНТ, mutation БИШ** | Хэсэгчилсэн буцаалтыг эх мөрийн `amount`-ыг **бууруулж** хэрэгжүүлэх нь татах мэт санагддаг ч БУРУУ — түүх устаж, "хэдийг зээлүүлсэн бэ" гэдэг мэдээлэл алдагдана. Оронд нь **эсрэг `direction`-той шинэ мөр** нэмнэ; үлдэгдэл нь ҮРГЭЛЖ бүх эвентийн тэмдэгтэй нийлбэр. Тиймээс `getDebtBalances()`/`netBalances()` хоёулаа **ӨӨРЧЛӨГДӨӨГҮЙ**. Шинэ бичлэг нэмэхдээ `repays_entry_id`-г ЗӨВХӨН `addDebtRepayment()`-ээр тавь (`POST /` нь ҮРГЭЛЖ `null` бичдэг) |
+| ⚠️ **019: status/delete нь ХҮҮХДҮҮД рүүгээ дамжих ЁСТОЙ** | Буцаалттай эх бичлэгийг **хааж** байгаад хүүхдээ мартвал үлдэгдэл `−20,000` болж "та өртэй" гэсэн ХУДАЛ дүн гарна; **устгаад** мартвал өнчин эвент яг тэр л үр дагавартай. `updateDebtEntry()` (status солигдоход) ба `deleteDebtEntry()` хоёул `repays_entry_id = :id`-аар хүүхдүүдийг нэг транзакцид дагуулна. Ирээдүйд өр дээр шинэ төлөв нэмбэл энэ cascade-ыг ЗААВАЛ дагалдуул |
+| ⚠️ **019: `direction`-ийн CHECK-ийг өргөтгөх гэж бүү оролд** | `CHECK (direction IN ('i_lent','i_borrowed'))` нь `CREATE TABLE` дотор шатсан — SQLite-д өргөтгөх ганц зам нь 12 алхамт **table rebuild**. Буцаалтад шинэ утга ХЭРЭГГҮЙ (эсрэг direction нь netting-д ижил утгатай). Ижил зарчим `status`, `currency` баганад ч үйлчилнэ |
 | Хасалтын хязгаар хаана хэрэгжсэн бэ | `excluded_amount ≥ 0` — **баганын CHECK**. `excluded_amount ≤ amount` — SQLite-д cross-column CHECK бичих боломжгүй тул **API давхарга (`setTransactionExcludedAmount`) + 2 trigger** (INSERT/UPDATE, `1e-6` хүлцэлтэй). Float нийлбэрийн бөөрөнхийлөлт "бүрэн хасагдсан"-ыг эвдэхээс сэргийлж `EXCLUSION_EPS = 1e-6` хэрэглэдэг |
 
 ---
 
-## 15. Одоогийн төлөв (2026-08-12)
+## 15. Одоогийн төлөв (2026-08-17)
 
 - Серверт 4 pm2 процесс online, домейн амьд.
-- **★ СҮҮЛИЙН АЖИЛ — ДЭД АНГИЛЛЫН СУУРЬ + 2 ШИНЭ АНГИЛАЛ (миграц **018**,
+- **★ СҮҮЛИЙН АЖИЛ — ХЭСЭГЧИЛСЭН БУЦААЛТ + ОРЛОГЫН АВТОМАТ ХАСАЛТ (миграц **019**,
+  ⏸️ **DEPLOY ХИЙГДЭЭГҮЙ — зөвшөөрөл ХҮЛЭЭЖ БАЙНА, 2026-08-17**):**
+  Хоёр бодит дутагдлыг хаав.
+  1. **Хэсэгчилсэн буцаалт.** Өмнө нь "Мөнх-од танд 50,000₮ өртэй"-г ЗӨВХӨН БҮТНЭЭР
+     хаах боломжтой байсан. Одоо `POST /api/debt-ledger/:id/repay` нь **тусдаа эвент**
+     үүсгэж (эсрэг `direction` + `repays_entry_id`), үлдэгдэл **30,000₮** болно.
+     Эх мөрийн `amount` ЗАСАГДАХГҮЙ, түүхэнд ХОЁУЛАА үлдэнэ.
+  2. **Орлого хиймлээр өсөх алдаа.** Банкаар ирсэн буцаалтыг `linkedTransactionId`-аар
+     холбоход тэр ОРЛОГЫН гүйлгээ `excluded_from_budget=1` + `manually_edited=1` болж
+     `/summary`, `/analytics/by-category`-ийн `totalIncome`-оос гарна.
+     ⚠️ **ҮЛДЭГДЭЛ ХӨНДӨГДӨӨГҮЙ** — `/balance-history` нь **БАЙТ ТУТМАА ИЖИЛ**
+     (тестээр түгжсэн). Бэлнээр буцаах = холбоосгүй эвент, бүрэн хүчинтэй.
+  3. **Миграц 019:** `debt_ledger.repays_entry_id` (`INTEGER NULL`, self-FK,
+     `ON DELETE SET NULL`) + `idx_debt_ledger_repays`. Additive, **backfill БАЙХГҮЙ**.
+     `direction`-ийн CHECK-д хүрээгүй (table rebuild-ээс зайлсхийв — §14).
+  4. **Cascade:** эх бичлэгийг хаах/нээх нь буцаалтууд руугаа дамжина (эс бөгөөс
+     үлдэгдэл ХУДАЛ сөрөг болно); эх бичлэг устахад буцаалтууд ХАМТ устана.
+     Бүх мутаци (`repay`/`link`/`unlink`/`delete`/`close`) **нэг SQLite транзакцид**.
+  5. **UI:** `DebtLedger.jsx`-ийн түүхийн мөр бүрт **«Буцаалт»** товч (нээлттэй эх
+     бичлэг дээр), inline `RepayForm` (үлдэгдлээр prefill, гүйлгээ холбох select),
+     буцаалтын мөр нь `↩` тэмдэг + «буцаалт» шошготой, эх мөр нь
+     «20,000₮ буцаагдсан · үлдэгдэл 30,000₮» гэж харуулна.
+  Шинэ тест **32** (`api/test/debt-repayment.test.js` 26 + `dashboard/src/lib/debt.test.js`
+  +6) — нийт **371** ногоон (өмнөх 339). `dashboard/dist` дахин build хийгдсэн.
+  ⚠️ **DEPLOY:** миграц бий → **DB backup ЗААВАЛ**; API restart дээр идемпотент
+  миграц ажиллана. `dist` мөн шинэчлэгдсэн тул scp хийхээ бүү мартаарай.
+  ⚠️ Мэдэгдсэн жижиг сул тал: Бүртгэл табын дээд талын «Энэ сарын орлого» карт нь
+  таб солиход **дахин татдаггүй** тул Шинжилгээ табад буцаалт бүртгэсний дараа
+  reload хийтэл хуучин дүнгээ харуулна (өмнөөс байсан зан төлөв, энэ ажлын
+  оруулсан регресс БИШ; засах бол компонент хоорондын refresh хэрэгтэй).
+- **★ ӨМНӨХ АЖИЛ — ДЭД АНГИЛЛЫН СУУРЬ + 2 ШИНЭ АНГИЛАЛ (миграц **018**,
   ✅ **DEPLOY ХИЙГДСЭН / LIVE 2026-08-12, commit `db429f6`**):**
   Гурван prompt-ын **2 дахь** нь. Энэ фазад **КЛИЕНТИЙН UI НЭМЭЭГҮЙ** — bot-ын хоёр
   шатат урсгал, dashboard-ийн dropdown, аналитикийн drill-down бүгд **Prompt 3**.

@@ -3,7 +3,7 @@ import { api } from '../lib/api.js';
 import { money, eurFmt } from '../lib/format.js';
 import {
   groupByCounterparty, totalsByCurrency, eurToMntDisplay, balancePhrase,
-  effectiveShare, remainingExcludable,
+  effectiveShare, remainingExcludable, isRepayment, outstandingOf,
 } from '../lib/debt.js';
 
 // Өр төлбөрийн дэвтэр (Шинжилгээ табын дотор). Хоёр харагдац:
@@ -14,6 +14,10 @@ import {
 //    байгаа үед "≈" тэмдэгтэйгээр нэмнэ (ханшгүй бол огт харуулахгүй).
 // ⚠️ ХУВААСАН зардал (016): гүйлгээ холбоход "энэ хүний хэсэг хэд вэ?" гэдгийг
 //    заана — гүйлгээ БҮХЭЛДЭЭ төсвөөс гарахгүй, зөвхөн тэр хэсэг нь гарна.
+// ⚠️ ХЭСЭГЧИЛСЭН БУЦААЛТ (019): "Буцаалт" нь эх бичлэгийг ЗАСАХГҮЙ — эсрэг
+//    чиглэлтэй ТУСДАА эвент болж түүхэнд үлдэнэ, үлдэгдэл нь нийлбэрээр буурна.
+//    Банкаар ирсэн буцаалтыг гүйлгээтэй холбовол тэр ОРЛОГО төсвөөс хасагдана
+//    (сарын орлого хиймлээр өсөхгүй) — ҮЛДЭГДЭЛД ХЭЗЭЭ Ч нөлөөлөхгүй.
 
 const cardCls = 'bg-cream-card border border-cream-border rounded-card p-[22px]';
 const inputCls = 'w-full h-[44px] px-[13px] border-[1.5px] border-cream-input rounded-[12px] bg-white font-body text-[14px] text-[#2A2722] outline-none';
@@ -88,6 +92,10 @@ export default function DebtLedger() {
       await load();
     } catch (e) { setErr(e.message || 'Устгахад алдаа гарлаа'); }
   }
+
+  // Эх бичлэг бүрийн counterparty-г буцаалтын мөр дээр харуулахад хэрэгтэй
+  // (буцаалт өөрөө ч counterparty-тай ч "аль өрийнх вэ" гэдгийг заана).
+  const byId = useMemo(() => new Map(entries.map((e) => [e.id, e])), [entries]);
 
   return (
     <div className={cardCls}>
@@ -178,7 +186,17 @@ export default function DebtLedger() {
       ) : (
         <div className="flex flex-col gap-[8px]">
           {entries.map((e) => (
-            <HistoryRow key={e.id} entry={e} eurMnt={eurMnt} onSettle={onSettle} onReopen={onReopen} onDelete={onDelete} />
+            <HistoryRow
+              key={e.id}
+              entry={e}
+              parent={isRepayment(e) ? byId.get(e.repaysEntryId) : null}
+              eurMnt={eurMnt}
+              onSettle={onSettle}
+              onReopen={onReopen}
+              onDelete={onDelete}
+              onRepaid={load}
+              onError={setErr}
+            />
           ))}
         </div>
       )}
@@ -205,66 +223,231 @@ function SummaryTile({ label, mnt, eur, eurMnt, hex }) {
   );
 }
 
-function HistoryRow({ entry, eurMnt, onSettle, onReopen, onDelete }) {
+function HistoryRow({ entry, parent, eurMnt, onSettle, onReopen, onDelete, onRepaid, onError }) {
   const [busy, setBusy] = useState(false);
+  const [repaying, setRepaying] = useState(false);
   const lent = entry.direction === 'i_lent';
   const settled = entry.status === 'settled';
   const approx = entry.currency === 'EUR' ? eurToMntDisplay(entry.amount, eurMnt) : null;
   // Холбосон гүйлгээнээс эзэлж буй хэсэг (тодорхойлоогүй бол бичлэгийн бүтэн дүн)
   const share = effectiveShare(entry);
 
+  // 019: буцаалтын эвент нь ӨӨРӨӨ өр БИШ — эх бичлэгийнхээ хэсэг. Тиймээс
+  // "зээлсэн/зээлүүлсэн" гэж БУРУУ шошголохгүй, "Хаах" товч ч гарахгүй
+  // (хаалт нь эх бичлэг дээрээ хийгддэг бөгөөд буцаалтууд руугаа дамждаг).
+  const repayment = isRepayment(entry);
+  const outstanding = outstandingOf(entry);
+  const repaid = Number(entry.repaid) || 0;
+  const canRepay = !repayment && !settled && outstanding > 0;
+
   const run = async (fn) => { setBusy(true); try { await fn(entry); } finally { setBusy(false); } };
 
   return (
     <div
-      className="flex flex-col gap-[10px] sm:flex-row sm:items-center sm:gap-[13px] border rounded-[13px] py-[12px] px-[14px]"
-      style={{ borderColor: '#F0E6D4', background: settled ? '#F7F3EA' : '#FFFDF9', opacity: settled ? 0.75 : 1 }}
+      className="border rounded-[13px] py-[12px] px-[14px]"
+      style={{
+        borderColor: repayment ? '#E4EFEC' : '#F0E6D4',
+        background: settled ? '#F7F3EA' : repayment ? '#F6FBFA' : '#FFFDF9',
+        opacity: settled ? 0.75 : 1,
+      }}
     >
-      <div className="w-[38px] h-[38px] shrink-0 rounded-[11px] flex items-center justify-center text-[17px]"
-        style={{ background: lent ? 'rgba(46,158,91,.12)' : 'rgba(216,72,59,.12)' }}>
-        {settled ? '✓' : lent ? '↗' : '↘'}
-      </div>
-
-      <div className="min-w-0 flex-1">
-        <div className="font-semibold text-[14px] truncate">
-          {entry.counterparty}
-          <span className="font-normal text-[13px] text-[#8C8578]"> · {lent ? 'зээлүүлсэн' : 'зээлсэн'}</span>
+      <div className="flex flex-col gap-[10px] sm:flex-row sm:items-center sm:gap-[13px]">
+        <div className="w-[38px] h-[38px] shrink-0 rounded-[11px] flex items-center justify-center text-[17px]"
+          style={{ background: repayment ? 'rgba(31,122,107,.12)' : lent ? 'rgba(46,158,91,.12)' : 'rgba(216,72,59,.12)' }}>
+          {settled ? '✓' : repayment ? '↩' : lent ? '↗' : '↘'}
         </div>
-        <div className="flex flex-wrap items-center gap-[8px] mt-[2px]">
-          <span className="text-[13px] text-[#A39A8A] whitespace-nowrap">{entry.entryDate}</span>
-          {settled && <span className="text-[13px] text-[#2E9E5B] whitespace-nowrap">хаагдсан</span>}
-          {entry.linkedTransactionId && (
-            <span className="text-[13px] text-[#3FA9A0] whitespace-nowrap">
-              🔗 #{entry.linkedTransactionId} · {amountText(share, entry.currency)} хасав
+
+        <div className="min-w-0 flex-1">
+          <div className="font-semibold text-[14px] truncate">
+            {entry.counterparty}
+            <span className="font-normal text-[13px] text-[#8C8578]">
+              {' · '}{repayment ? 'буцаалт' : lent ? 'зээлүүлсэн' : 'зээлсэн'}
             </span>
-          )}
-          {entry.settledTransactionId && <span className="text-[13px] text-[#3FA9A0] whitespace-nowrap">✓#{entry.settledTransactionId}</span>}
+          </div>
+          <div className="flex flex-wrap items-center gap-[8px] mt-[2px]">
+            <span className="text-[13px] text-[#A39A8A] whitespace-nowrap">{entry.entryDate}</span>
+            {settled && <span className="text-[13px] text-[#2E9E5B] whitespace-nowrap">хаагдсан</span>}
+            {repayment && parent && (
+              <span className="text-[13px] text-[#1F7A6B] whitespace-nowrap">
+                ↩ {amountText(parent.amount, parent.currency)}-ийн өрөөс
+              </span>
+            )}
+            {/* Хэсэгчилсэн буцаалт хийгдсэн ЭХ бичлэг — үлдэгдлээ шууд харуулна */}
+            {!repayment && repaid > 0 && !settled && (
+              <span className="text-[13px] text-[#1F7A6B] whitespace-nowrap">
+                {amountText(repaid, entry.currency)} буцаагдсан · үлдэгдэл{' '}
+                <span className="font-semibold">{amountText(outstanding, entry.currency)}</span>
+              </span>
+            )}
+            {entry.linkedTransactionId && (
+              <span className="text-[13px] text-[#3FA9A0] whitespace-nowrap">
+                🔗 #{entry.linkedTransactionId} · {amountText(share, entry.currency)} хасав
+              </span>
+            )}
+            {entry.settledTransactionId && <span className="text-[13px] text-[#3FA9A0] whitespace-nowrap">✓#{entry.settledTransactionId}</span>}
+          </div>
+          {entry.note && <div className="text-[13px] text-[#8C8578] mt-[2px] truncate">📝 {entry.note}</div>}
         </div>
-        {entry.note && <div className="text-[13px] text-[#8C8578] mt-[2px] truncate">📝 {entry.note}</div>}
+
+        <div className="flex items-center justify-between gap-[10px] sm:justify-end sm:shrink-0">
+          <div className="font-display font-semibold text-[15px] whitespace-nowrap" style={{ color: lent ? '#2E9E5B' : '#D8483B' }}>
+            {lent ? '+' : '−'}{amountText(entry.amount, entry.currency)}
+            {approx != null && <div className="font-body font-normal text-[13px] text-[#A39A8A] text-right">≈ {money(approx)}</div>}
+          </div>
+          <div className="flex gap-[6px] shrink-0">
+            {canRepay && (
+              <button
+                disabled={busy}
+                onClick={() => setRepaying((v) => !v)}
+                className="h-[44px] px-[13px] border rounded-[11px] font-body text-[13px] cursor-pointer whitespace-nowrap"
+                style={{ borderColor: '#1F7A6B', background: repaying ? '#1F7A6B' : '#fff', color: repaying ? '#fff' : '#1F7A6B' }}
+              >
+                {repaying ? '✕' : 'Буцаалт'}
+              </button>
+            )}
+            {!repayment && (
+              <button
+                disabled={busy}
+                onClick={() => run(settled ? onReopen : onSettle)}
+                className="h-[44px] px-[13px] border border-cream-input bg-white rounded-[11px] font-body text-[13px] text-[#6E665A] cursor-pointer whitespace-nowrap"
+              >
+                {settled ? 'Нээх' : 'Хаах'}
+              </button>
+            )}
+            <button
+              disabled={busy}
+              onClick={() => run(onDelete)}
+              title="Устгах"
+              className="w-[44px] h-[44px] border border-cream-input bg-white rounded-[11px] text-[13px] text-[#A39A8A] cursor-pointer"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
       </div>
 
-      <div className="flex items-center justify-between gap-[10px] sm:justify-end sm:shrink-0">
-        <div className="font-display font-semibold text-[15px] whitespace-nowrap" style={{ color: lent ? '#2E9E5B' : '#D8483B' }}>
-          {lent ? '+' : '−'}{amountText(entry.amount, entry.currency)}
-          {approx != null && <div className="font-body font-normal text-[13px] text-[#A39A8A] text-right">≈ {money(approx)}</div>}
+      {repaying && (
+        <RepayForm
+          entry={entry}
+          outstanding={outstanding}
+          onDone={() => { setRepaying(false); onRepaid(); }}
+          onCancel={() => setRepaying(false)}
+          onError={onError}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Буцаалт бүртгэх маягт (эх бичлэгийн мөрөн дотор нээгдэнэ).
+ * ⚠️ Хэн/валют нь эх бичлэгээс өвлөгддөг тул ЭНД талбар БАЙХГҮЙ — өөр хүн рүү
+ *    эсвэл өөр валютаар "буцаах" боломжгүй (сервер ч мөн адил хамгаална).
+ * ⚠️ Гүйлгээ холбовол тэр мөнгөн дүн ТӨСӨВ/ШИНЖИЛГЭЭНЭЭС хасагдана. Зээлүүлсэн
+ *    өрийн буцаалт нь ОРЛОГО байдаг тул сарын орлого хиймлээр өсөхгүй болно.
+ *    Бэлнээр буцаасан бол холбохгүй орхино — бүрэн хүчинтэй.
+ */
+function RepayForm({ entry, outstanding, onDone, onCancel, onError }) {
+  const [amount, setAmount] = useState(String(outstanding || ''));
+  const [entryDate, setEntryDate] = useState(todayYmd());
+  const [note, setNote] = useState('');
+  const [linkId, setLinkId] = useState('');
+  const [txns, setTxns] = useState([]);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    api.transactions({ limit: 50 })
+      .then((r) => { if (alive) setTxns(r.data || []); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
+
+  const linkedTxn = useMemo(
+    () => txns.find((t) => String(t.id) === String(linkId)) || null,
+    [txns, linkId]
+  );
+  const txnCurrency = linkedTxn ? (linkedTxn.currency || 'MNT') : null;
+  const currencyMismatch = !!linkedTxn && txnCurrency !== entry.currency;
+  const amt = Number(amount);
+  const amountInvalid = !Number.isFinite(amt) || amt <= 0;
+  const amountTooBig = !amountInvalid && amt > outstanding + 1e-6;
+  const blocked = currencyMismatch || amountInvalid || amountTooBig;
+
+  async function submit() {
+    if (blocked) return;
+    setBusy(true);
+    try {
+      await api.repayDebt(entry.id, {
+        amount: amt,
+        entryDate,
+        note: note.trim() || null,
+        linkedTransactionId: linkId ? Number(linkId) : null,
+      });
+      onError('');
+      onDone();
+    } catch (e) {
+      onError(e.message || 'Буцаалт бүртгэхэд алдаа гарлаа');
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-[12px] pt-[12px] border-t" style={{ borderColor: '#F0E6D4' }}>
+      <div className="text-[13px] text-[#6E665A] mb-[10px]">
+        <span className="font-semibold">{entry.counterparty}</span>-ийн үлдэгдэл өр:{' '}
+        <span className="font-semibold">{amountText(outstanding, entry.currency)}</span>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-[12px]">
+        <div>
+          <label className={labelCls}>Буцаасан дүн</label>
+          <input value={amount} onChange={(e) => setAmount(e.target.value)}
+            inputMode="decimal" placeholder="0" className={inputCls} />
         </div>
-        <div className="flex gap-[6px] shrink-0">
-          <button
-            disabled={busy}
-            onClick={() => run(settled ? onReopen : onSettle)}
-            className="h-[44px] px-[13px] border border-cream-input bg-white rounded-[11px] font-body text-[13px] text-[#6E665A] cursor-pointer whitespace-nowrap"
-          >
-            {settled ? 'Нээх' : 'Хаах'}
-          </button>
-          <button
-            disabled={busy}
-            onClick={() => run(onDelete)}
-            title="Устгах"
-            className="w-[44px] h-[44px] border border-cream-input bg-white rounded-[11px] text-[13px] text-[#A39A8A] cursor-pointer"
-          >
-            ✕
-          </button>
+        <div>
+          <label className={labelCls}>Огноо</label>
+          <input type="date" value={entryDate} onChange={(e) => setEntryDate(e.target.value)} className={inputCls} />
         </div>
+        <div className="sm:col-span-2">
+          <label className={labelCls}>Тэмдэглэл (сонголттой)</label>
+          <input value={note} onChange={(e) => setNote(e.target.value)}
+            maxLength={500} placeholder="жишээ: бэлнээр өгсөн" className={inputCls} />
+        </div>
+        <div className="sm:col-span-2">
+          <label className={labelCls}>Банкаар ирсэн бол гүйлгээг холбох (сонголттой)</label>
+          <select value={linkId} onChange={(e) => setLinkId(e.target.value)} className={inputCls + ' cursor-pointer'}>
+            <option value="">— бэлнээр / холбохгүй —</option>
+            {txns.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.txn_date} · {t.type === 'income' ? '+' : '−'}{amountText(t.amount, t.currency)} · {(t.merchant_place || t.description || '').slice(0, 40)}
+              </option>
+            ))}
+          </select>
+          <div className="text-[13px] mt-[5px]" style={{ color: blocked ? '#D8483B' : '#A39A8A' }}>
+            {currencyMismatch
+              ? `Гүйлгээ ${txnCurrency}, өр ${entry.currency} — валют таарахгүй тул холбох боломжгүй.`
+              : amountInvalid
+                ? 'Дүн эерэг тоо байх ёстой.'
+                : amountTooBig
+                  ? `Үлдэгдэл өр ${amountText(outstanding, entry.currency)}-аас их байж болохгүй.`
+                  : 'Холбосон гүйлгээ төсөв/шинжилгээнээс хасагдана (орлого хиймлээр өсөхгүй). Дансны ҮЛДЭГДЭЛД нөлөөлөхгүй.'}
+          </div>
+        </div>
+      </div>
+      <div className="flex flex-col gap-[10px] sm:flex-row mt-[14px]">
+        <button onClick={onCancel}
+          className="h-[44px] px-[18px] border-[1.5px] border-cream-input bg-white rounded-[12px] font-body font-semibold text-[14px] text-[#6E665A] cursor-pointer">
+          Болих
+        </button>
+        <button onClick={submit} disabled={busy || blocked}
+          className="flex-1 h-[44px] border-none rounded-[12px] font-body font-semibold text-[14.5px]"
+          style={{
+            background: busy || blocked ? '#E7DECF' : '#1F7A6B',
+            color: busy || blocked ? '#B7AD9C' : '#fff',
+            cursor: busy || blocked ? 'not-allowed' : 'pointer',
+          }}>
+          {busy ? 'Бүртгэж байна...' : 'Буцаалт бүртгэх'}
+        </button>
       </div>
     </div>
   );

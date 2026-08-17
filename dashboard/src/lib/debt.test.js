@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import {
   signedAmount, netBalances, groupByCounterparty, totalsByCurrency,
   eurToMntDisplay, balancePhrase, effectiveShare, remainingExcludable, exclusionMarker,
+  isRepayment, outstandingOf,
 } from './debt.js';
 
 const e = (over = {}) => ({
@@ -136,4 +137,58 @@ test('exclusionMarker: хасалтгүй → null, хэсэгчилсэн → �
   assert.equal(full.net, 0);
   // float бөөрөнхийлөлт "бүрэн"-ийг эвдэхгүй
   assert.equal(exclusionMarker({ amount: 0.3, excluded_amount: 0.1 + 0.2 }).full, true);
+});
+
+// ===================== ХЭСЭГЧИЛСЭН БУЦААЛТ (019) =====================
+
+test('isRepayment: repaysEntryId байвал буцаалтын эвент', () => {
+  assert.equal(isRepayment(e()), false);
+  assert.equal(isRepayment(e({ repaysEntryId: null })), false);
+  assert.equal(isRepayment(e({ repaysEntryId: 7 })), true);
+  assert.equal(isRepayment(null), false);
+});
+
+test('★ netBalances: буцаалт нь ЭСРЭГ чиглэлээр цэвэршинэ (50,000 − 20,000 = 30,000)', () => {
+  const out = netBalances([
+    e({ counterparty: 'Мөнх-од', direction: 'i_lent', amount: 50000 }),
+    e({ counterparty: 'Мөнх-од', direction: 'i_borrowed', amount: 20000, repaysEntryId: 1 }),
+  ]);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].net, 30000, '★ үлдэгдэл 30,000₮');
+  assert.equal(out[0].direction, 'i_lent', 'тэр хүн ХЭВЭЭР надад өртэй');
+});
+
+test('★ Бүтэн буцаалт → үлдэгдэл огт харагдахгүй (тэг мөрийг буцаадаггүй)', () => {
+  const out = netBalances([
+    e({ counterparty: 'Мөнх-од', direction: 'i_lent', amount: 50000 }),
+    e({ counterparty: 'Мөнх-од', direction: 'i_borrowed', amount: 50000, repaysEntryId: 1 }),
+  ]);
+  assert.equal(out.length, 0);
+});
+
+test('★ Буцаалт нь ВАЛЮТ ХООРОНД цэвэрших ЁСГҮЙ (EUR өрийг MNT-ээр хаахгүй)', () => {
+  const out = netBalances([
+    e({ counterparty: 'Ээж', direction: 'i_lent', amount: 100, currency: 'EUR' }),
+    e({ counterparty: 'Ээж', direction: 'i_borrowed', amount: 100, currency: 'MNT', repaysEntryId: 1 }),
+  ]);
+  assert.equal(out.length, 2, 'хоёр ӨӨР валютын өр тусдаа үлдэнэ');
+  assert.equal(out.find((b) => b.currency === 'EUR').net, 100);
+  assert.equal(out.find((b) => b.currency === 'MNT').net, -100);
+});
+
+test('Хаагдсан буцаалт үлдэгдэлд оролцохгүй (эх бичлэгтэйгээ хамт хаагддаг)', () => {
+  const out = netBalances([
+    e({ counterparty: 'Хаалт', direction: 'i_lent', amount: 50000, status: 'settled' }),
+    e({ counterparty: 'Хаалт', direction: 'i_borrowed', amount: 20000, status: 'settled', repaysEntryId: 1 }),
+  ]);
+  assert.equal(out.length, 0, '★ сөрөг үлдэгдэл ҮҮСЭХГҮЙ');
+});
+
+test('outstandingOf: серверийн дүнг хэрэглэнэ, буцаалтын эвент нь 0', () => {
+  assert.equal(outstandingOf(e({ amount: 50000, outstanding: 30000 })), 30000);
+  assert.equal(outstandingOf(e({ amount: 50000, repaysEntryId: 1, outstanding: 0 })), 0);
+  // Сервер илгээгээгүй бол (хуучин хариу) бүтэн дүн
+  assert.equal(outstandingOf(e({ amount: 50000 })), 50000);
+  // ХЭЗЭЭ Ч сөрөг болохгүй
+  assert.equal(outstandingOf(e({ amount: 50000, outstanding: -5 })), 0);
 });

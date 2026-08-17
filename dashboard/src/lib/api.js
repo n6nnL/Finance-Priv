@@ -180,6 +180,8 @@ export const api = {
   debtBalances: () => req('/api/debt-ledger/balances'),
   addDebt: (entry) => req('/api/debt-ledger', { method: 'POST', body: entry }),
   updateDebt: (id, patch) => req(`/api/debt-ledger/${id}`, { method: 'PATCH', body: patch }),
+  // Хэсэгчилсэн буцаалт (019) — эх бичлэгийг засахгүй, тусдаа эвент үүсгэнэ
+  repayDebt: (id, body) => req(`/api/debt-ledger/${id}/repay`, { method: 'POST', body }),
   deleteDebt: (id) => req(`/api/debt-ledger/${id}`, { method: 'DELETE' }),
   // ---- Real-time tracker ----
   budgetStatus: () => req('/api/budget-status?cycle=current'),

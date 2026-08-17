@@ -440,6 +440,32 @@ export function createDb(dbPath, opts = {}) {
     if (!hasColumn('category_overrides', 'subcategory')) {
       db.exec('ALTER TABLE category_overrides ADD COLUMN subcategory TEXT');
     }
+
+    // 019: ХЭСЭГЧИЛСЭН БУЦААЛТ (partial repayment) ------------------------------
+    // Асуудал: "Мөнх-од танд 50,000₮ өртэй"-г ЗӨВХӨН БҮТНЭЭР нь хаах боломжтой
+    // байсан — 20,000₮ буцаахад үлдэгдэл 30,000₮ болох зам БАЙХГҮЙ.
+    //
+    // Загвар: буцаалт нь ЭХ бичлэгийг ЗАСАХГҮЙ (mutation БИШ) — ТУСДАА ЭВЕНТ.
+    // Хүн × валютын үлдэгдэл нь бүх эвентийн ТЭМДЭГТЭЙ НИЙЛБЭР хэвээр:
+    //     +50,000 (i_lent) + −20,000 (i_borrowed) = 30,000  ✓
+    // Тиймээс буцаалт нь эх бичлэгийн ЭСРЭГ `direction`-той энгийн мөр болно.
+    //
+    // ⚠️ ЯАГААД `direction`-д шинэ утга НЭМЭЭГҮЙ вэ: тэр баганын CHECK нь
+    //    CREATE TABLE дотор шатсан бөгөөд SQLite-д CHECK-ийг өргөтгөх ганц зам нь
+    //    хүснэгтийг БҮТНЭЭР дахин барих (12 алхамт rebuild) — өгөгдөлд эрсдэлтэй,
+    //    additive БИШ. Эсрэг direction нь netting-ийн хувьд ЯГ ижил утгатай тул
+    //    getDebtBalances-ийн query ӨӨРЧЛӨГДӨХГҮЙГЭЭР зөв ажиллана.
+    //
+    // repays_entry_id — ЯМАР бичлэгийг буцааж байгаа нь (self-reference).
+    //   • NULL  → энгийн зээл/зээллэг (хуучин БҮХ мөр ийм — backfill ХИЙХГҮЙ)
+    //   • тоо   → буцаалтын эвент; UI "буцаалт" гэж шошголж, эх бичлэгийн
+    //             үлдэгдлийг (outstanding) үүнээс тооцно.
+    // Additive, nullable, DEFAULT NULL ⇒ буцаах нь зүгээр л баганыг устгах
+    // (эсвэл орхих) — хуучин код бүр өөрчлөлтгүй ажиллана.
+    if (!hasColumn('debt_ledger', 'repays_entry_id')) {
+      db.exec('ALTER TABLE debt_ledger ADD COLUMN repays_entry_id INTEGER REFERENCES debt_ledger(id) ON DELETE SET NULL');
+    }
+    db.exec('CREATE INDEX IF NOT EXISTS idx_debt_ledger_repays ON debt_ledger (repays_entry_id)');
   }
   migrate();
 
@@ -1177,7 +1203,7 @@ export function createDb(dbPath, opts = {}) {
 
   const _debtCols = `id, user_id, counterparty, direction, amount, currency, entry_date, note,
                      status, linked_transaction_id, settled_transaction_id, exclusion_share,
-                     created_at, settled_at`;
+                     repays_entry_id, created_at, settled_at`;
 
   const _mapDebt = (r) => (r ? {
     id: Number(r.id),
@@ -1193,6 +1219,8 @@ export function createDb(dbPath, opts = {}) {
     // NULL = "бичлэгийн бүтэн amount-ыг эзэлнэ" (түгээмэл тохиолдол). Хэрэглэгч
     // тодорхой хувь хэмжээ (ж: цайллагын үлдэгдэл жигд бус хуваагдсан) өгвөл тоо.
     exclusionShare: r.exclusion_share == null ? null : Number(r.exclusion_share),
+    // 019: NULL = энгийн зээл/зээллэг; тоо = ЭНЭ бичлэгийг буцааж буй эвент.
+    repaysEntryId: r.repays_entry_id == null ? null : Number(r.repays_entry_id),
     createdAt: r.created_at,
     settledAt: r.settled_at ?? null,
   } : null);
@@ -1204,14 +1232,28 @@ export function createDb(dbPath, opts = {}) {
     return _mapDebt(_getDebt.get(id, userId));
   }
 
-  /** Жагсаалт — шинэ нь эхэнд. counterparty/status шүүлт сонголттой. */
+  /**
+   * Жагсаалт — шинэ нь эхэнд. counterparty/status шүүлт сонголттой.
+   * 019: мөр бүрт `repaid` (нээлттэй буцаалтуудын нийлбэр) ба `outstanding`
+   * (amount − repaid) нэмэгдэнэ. Буцаалтын эвент дээр хоёулаа 0 — тэр нь
+   * өөрөө "үлдэгдэлтэй өр" БИШ, эх бичлэгийн хэсэг.
+   */
   function listDebtEntries(userId, { counterparty, status } = {}) {
-    const where = ['user_id = ?'];
+    const where = ['d.user_id = ?'];
     const params = [userId];
-    if (counterparty) { where.push('counterparty = ?'); params.push(String(counterparty).trim()); }
-    if (status) { where.push('status = ?'); params.push(status); }
-    return db.prepare(`SELECT ${_debtCols} FROM debt_ledger WHERE ${where.join(' AND ')}
-      ORDER BY entry_date DESC, id DESC`).all(...params).map(_mapDebt);
+    if (counterparty) { where.push('d.counterparty = ?'); params.push(String(counterparty).trim()); }
+    if (status) { where.push('d.status = ?'); params.push(status); }
+    const cols = _debtCols.split(',').map((c) => `d.${c.trim()}`).join(', ');
+    return db.prepare(`
+      SELECT ${cols},
+             (SELECT COALESCE(SUM(r.amount), 0) FROM debt_ledger r
+               WHERE r.user_id = d.user_id AND r.repays_entry_id = d.id AND r.status = 'open') AS repaid
+      FROM debt_ledger d WHERE ${where.join(' AND ')}
+      ORDER BY d.entry_date DESC, d.id DESC`).all(...params)
+      .map((r) => {
+        const repaid = r.repays_entry_id == null ? Number(r.repaid) : 0;
+        return { ..._mapDebt(r), repaid, outstanding: r.repays_entry_id == null ? Math.max(0, Number(r.amount) - repaid) : 0 };
+      });
   }
 
   /**
@@ -1360,9 +1402,9 @@ export function createDb(dbPath, opts = {}) {
 
   const _insertDebt = db.prepare(`
     INSERT INTO debt_ledger (user_id, counterparty, direction, amount, currency, entry_date, note,
-                             status, linked_transaction_id, exclusion_share, created_at)
+                             status, linked_transaction_id, exclusion_share, repays_entry_id, created_at)
     VALUES (@user_id, @counterparty, @direction, @amount, @currency, @entry_date, @note,
-            'open', @linked, @share, datetime('now'))`);
+            'open', @linked, @share, @repays, datetime('now'))`);
 
   /**
    * Шинэ өрийн бичлэг. linked_transaction_id өгвөл тэр гүйлгээнээс ЭНЭ бичлэгийн
@@ -1383,6 +1425,86 @@ export function createDb(dbPath, opts = {}) {
         note: e.note ?? null,
         linked: e.linkedTransactionId ?? null,
         share: e.exclusionShare ?? null,
+        repays: null, // энгийн бичлэг — буцаалт нь addDebtRepayment-ээр л үүснэ
+      });
+      if (e.linkedTransactionId != null) recomputeTransactionExclusion(userId, e.linkedTransactionId);
+      return _mapDebt(_getDebt.get(Number(res.lastInsertRowid), userId));
+    });
+  }
+
+  // ---- 019: ХЭСЭГЧИЛСЭН БУЦААЛТ (partial repayment) ----
+
+  /**
+   * Тухайн ЭХ бичлэгийн НЭЭЛТТЭЙ буцаалтуудын нийлбэр.
+   * ⚠️ Зөвхөн status='open' — хаагдсан эвент үлдэгдэлд оролцдоггүй тул
+   * (getDebtBalances-ийн дүрэмтэй ЯГ ижил) энд ч оролцох ЁСГҮЙ.
+   */
+  const _repaidSum = db.prepare(`SELECT COALESCE(SUM(amount), 0) AS s FROM debt_ledger
+    WHERE user_id=? AND repays_entry_id=? AND status='open'`);
+
+  /**
+   * Эх бичлэгийн ҮЛДЭГДЭЛ өр: amount − нээлттэй буцаалтуудын нийлбэр.
+   * 50,000 зээлүүлсэн, 20,000 буцаагдсан → 30,000.
+   * @returns {number|null} бичлэг олдохгүй бол null
+   */
+  function getDebtOutstanding(userId, entryId) {
+    const cur = _getDebt.get(entryId, userId);
+    if (!cur) return null;
+    // Буцаалтын эвент өөрөө "үлдэгдэлтэй" биш (тэр нь эх бичлэгийн хэсэг).
+    if (cur.repays_entry_id != null) return 0;
+    const repaid = Number(_repaidSum.get(userId, entryId).s);
+    return Math.max(0, Number(cur.amount) - repaid);
+  }
+
+  /**
+   * Буцаалтын эвент бүртгэх. Эх бичлэгийг ЗАСАХГҮЙ — эсрэг чиглэлтэй ТУСДАА мөр
+   * үүсгэнэ, ингэснээр хүн × валютын үлдэгдэл нь бүх эвентийн тэмдэгтэй нийлбэр
+   * хэвээр үлдэнэ (netting).
+   *
+   * counterparty / currency нь эх бичлэгээс ӨВЛӨГДӨНӨ (дуудагч өгөх боломжгүй) —
+   * ингэснээр өөр хүн рүү эсвэл өөр валют руу "буцаах" боломжгүй болно.
+   *
+   * linkedTransactionId өгвөл тэр гүйлгээ (банкаар ирсэн ОРЛОГО) төсөв/шинжилгээний
+   * тооцооноос хасагдана — НЭГ транзакцид, тал дутуу төлөв үүсэхгүй.
+   * ⚠️ ҮЛДЭГДЭЛД ХЭЗЭЭ Ч НӨЛӨӨЛӨХГҮЙ (015/016-гийн заагтай ЯГ ижил): мөнгө
+   *    бодитоор дансанд ОРСОН тул balance/balanceHistory-д хэвээр тоологдоно.
+   * Бэлнээр буцаасан бол холбоосгүй (null) — энэ нь БҮРЭН ХҮЧИНТЭЙ.
+   *
+   * @throws {ExclusionError} NOT_FOUND / ALREADY_SETTLED / NOT_AN_ENTRY /
+   *   OVER_REPAYMENT / CURRENCY_MISMATCH — бүгд бүхэлдээ rollback болно
+   */
+  function addDebtRepayment(userId, entryId, e) {
+    return inTransaction(() => {
+      const parent = _getDebt.get(entryId, userId);
+      if (!parent) throw new ExclusionError('NOT_FOUND', 'Өрийн бичлэг олдсонгүй');
+      if (parent.repays_entry_id != null) {
+        throw new ExclusionError('NOT_AN_ENTRY', 'Буцаалтын эвент рүү дахин буцаалт бүртгэх боломжгүй');
+      }
+      if (parent.status !== 'open') {
+        throw new ExclusionError('ALREADY_SETTLED', 'Хаагдсан өр дээр буцаалт бүртгэх боломжгүй');
+      }
+      const amt = Number(e.amount);
+      const outstanding = Number(parent.amount) - Number(_repaidSum.get(userId, entryId).s);
+      if (amt > outstanding + EXCLUSION_EPS) {
+        throw new ExclusionError('OVER_REPAYMENT',
+          `Буцаалтын дүн (${amt}) үлдэгдэл өрөөс (${outstanding}) их байж болохгүй`);
+      }
+
+      const currency = parent.currency || 'MNT';
+      if (e.linkedTransactionId != null) assertLinkCurrency(userId, e.linkedTransactionId, currency);
+
+      const res = _insertDebt.run({
+        user_id: userId,
+        counterparty: parent.counterparty,
+        currency,
+        // ЭСРЭГ чиглэл = netting-д хасагдана (тэр өртэй байсан бол өр нь буурна).
+        direction: parent.direction === 'i_lent' ? 'i_borrowed' : 'i_lent',
+        amount: amt,
+        entry_date: e.entryDate,
+        note: e.note ?? null,
+        linked: e.linkedTransactionId ?? null,
+        share: e.exclusionShare ?? null,
+        repays: entryId,
       });
       if (e.linkedTransactionId != null) recomputeTransactionExclusion(userId, e.linkedTransactionId);
       return _mapDebt(_getDebt.get(Number(res.lastInsertRowid), userId));
@@ -1432,6 +1554,18 @@ export function createDb(dbPath, opts = {}) {
         WHERE id=@id AND user_id=@user_id`)
         .run({ ...next, id, user_id: userId });
 
+      // 019: ХААХ/НЭЭХ нь буцаалтын эвентүүддээ ЗААВАЛ дамжина.
+      // Эс бөгөөс: 50,000 (open→settled) хасагдаж, −20,000 буцаалт нь НЭЭЛТТЭЙ
+      // үлдэж, үлдэгдэл нь −20,000 болж "та тэр хүнд өртэй" гэсэн ХУДАЛ дүн
+      // гарна. Хаах = "үлдэгдлийг тэг болгох" тул хүүхдүүд нь ХАМТ хаагдана.
+      if (patch.status !== undefined && cur.status !== next.status && cur.repays_entry_id == null) {
+        db.prepare(`UPDATE debt_ledger
+          SET status=@status,
+              settled_at=CASE WHEN @status='settled' THEN COALESCE(settled_at, datetime('now')) ELSE NULL END
+          WHERE user_id=@user_id AND repays_entry_id=@parent`)
+          .run({ status: next.status, user_id: userId, parent: id });
+      }
+
       // Хөндөгдсөн БҮХ гүйлгээг (хуучин + шинэ) дахин тооцоолно. amount/share
       // өөрчлөгдсөн ч холбоос хэвээр бол хасалт зөв дагаж өөрчлөгдөнө.
       for (const txnId of new Set([oldLinked, oldSettled, next.linked, next.settledTxn].filter((v) => v != null))) {
@@ -1451,11 +1585,26 @@ export function createDb(dbPath, opts = {}) {
     return inTransaction(() => {
       const cur = _getDebt.get(id, userId);
       if (!cur) return 0;
+
+      // 019: ЭХ бичлэг устахад буцаалтууд нь ХАМТ устана. ON DELETE SET NULL-аар
+      // өнчрүүлбэл тэдгээр нь эсрэг чиглэлтэй, эзэнгүй мөр болж үлдэгдлийг ХУДАЛ
+      // сөрөг болгоно. "Өр байгаагүй" ⇒ "түүний буцаалт ч байгаагүй".
+      // ⚠️ Хүүхдүүдийн холбогдсон гүйлгээг ч дахин тооцоолохын тулд ӨМНӨ нь цуглуулна.
+      const touched = new Set([cur.linked_transaction_id, cur.settled_transaction_id].filter((v) => v != null));
+      if (cur.repays_entry_id == null) {
+        for (const kid of db.prepare(`SELECT linked_transaction_id, settled_transaction_id
+          FROM debt_ledger WHERE user_id=? AND repays_entry_id=?`).all(userId, id)) {
+          if (kid.linked_transaction_id != null) touched.add(Number(kid.linked_transaction_id));
+          if (kid.settled_transaction_id != null) touched.add(Number(kid.settled_transaction_id));
+        }
+        db.prepare('DELETE FROM debt_ledger WHERE user_id=? AND repays_entry_id=?').run(userId, id);
+      }
+
       const changes = db.prepare('DELETE FROM debt_ledger WHERE id=? AND user_id=?').run(id, userId).changes;
       if (changes) {
-        for (const txnId of new Set([cur.linked_transaction_id, cur.settled_transaction_id].filter((v) => v != null))) {
-          recomputeTransactionExclusion(userId, txnId);
-        }
+        // Устгасны ДАРАА дахин тооцоолно — үлдсэн бичлэгүүдийн хувь хэмжээ
+        // хэвээр үлдэж, зөвхөн устсанынх нь хасагдана (reference-count).
+        for (const txnId of touched) recomputeTransactionExclusion(userId, txnId);
       }
       return changes;
     });
@@ -1475,6 +1624,8 @@ export function createDb(dbPath, opts = {}) {
     // өр төлбөрийн дэвтэр (debt_ledger)
     listDebtEntries, getDebtEntry, getDebtBalances, addDebtEntry, updateDebtEntry, deleteDebtEntry,
     isTransactionReferencedByOtherDebt,
+    // 019: хэсэгчилсэн буцаалт
+    addDebtRepayment, getDebtOutstanding,
     // real-time tracker: %-хуваарилалт
     getBudgetAllocations, saveBudgetAllocations,
     // overrides

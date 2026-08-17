@@ -55,6 +55,18 @@ const CreateSchema = z.object({
   exclusionShare: EXCL_SHARE,
 });
 
+// 019 — Буцаалт (repayment). counterparty/currency/direction нь ЭХ бичлэгээс
+// өвлөгддөг тул ЭНД байхгүй: өөр хүн рүү, өөр валютаар "буцаах" боломжгүй.
+const RepaySchema = z.object({
+  amount: z.number({ invalid_type_error: 'amount нь тоо байх ёстой' }).finite().positive('amount эерэг байх ёстой'),
+  entryDate: z.string().regex(YMD, 'entryDate нь YYYY-MM-DD байх ёстой'),
+  note: z.string().max(500).nullable().optional(),
+  // Банкаар ирсэн ОРЛОГЫН гүйлгээ. Өгвөл тэр гүйлгээ төсөв/шинжилгээнээс хасагдана
+  // (орлого хиймлээр өсөхгүй). Бэлнээр буцаасан бол өгөхгүй — БҮРЭН хүчинтэй.
+  linkedTransactionId: z.number().int().positive().nullable().optional(),
+  exclusionShare: EXCL_SHARE,
+}).strict();
+
 // PATCH — бүх талбар сонголттой (өгсөнийг Л шинэчилнэ)
 const PatchSchema = z.object({
   counterparty: z.string().trim().min(1).max(100).optional(),
@@ -130,6 +142,42 @@ export function createDebtLedgerRouter({ db }) {
     } catch (err) {
       if (handleExclusionError(err, res)) return undefined;
       logger.error('POST /debt-ledger алдаа', { err: err?.message });
+      return res.status(500).json({ status: 'error', error: 'Internal Server Error' });
+    }
+  });
+
+  // ---- POST /api/debt-ledger/:id/repay — ХЭСЭГЧИЛСЭН БУЦААЛТ (019) ----
+  //  Эх бичлэгийг ЗАСАХГҮЙ: эсрэг чиглэлтэй ТУСДАА эвент үүсгэнэ. 50,000₮-ийн
+  //  өр дээр 20,000₮ буцаахад үлдэгдэл 30,000₮ болно (netting), түүх нь ХОЁУЛАА
+  //  харагдана. linkedTransactionId өгвөл тэр орлогын гүйлгээ төсвөөс хасагдана.
+  router.post('/:id/repay', (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id) || id <= 0) {
+        return res.status(400).json({ status: 'error', error: 'id буруу' });
+      }
+      const parsed = RepaySchema.safeParse(req.body || {});
+      if (!parsed.success) {
+        return res.status(400).json({ status: 'error', error: 'Хүчингүй мөр', details: zodErrors(parsed.error) });
+      }
+      // Өөр хэрэглэгчийн гүйлгээ рүү холбохыг зөвшөөрөхгүй (tenant isolation)
+      if (!db.transactionBelongsToUser(req.userId, parsed.data.linkedTransactionId ?? null)) {
+        return res.status(400).json({ status: 'error', error: 'linkedTransactionId олдсонгүй' });
+      }
+      const entry = db.addDebtRepayment(req.userId, id, parsed.data);
+      return res.status(201).json({
+        status: 'ok',
+        entry,
+        outstanding: db.getDebtOutstanding(req.userId, id),
+        balances: db.getDebtBalances(req.userId),
+      });
+    } catch (err) {
+      // Бичлэг олдоогүй нь 404 (бусад дүрмийн зөрчил 400)
+      if (err?.code === 'NOT_FOUND') {
+        return res.status(404).json({ status: 'error', error: err.message, code: err.code });
+      }
+      if (handleExclusionError(err, res)) return undefined;
+      logger.error('POST /debt-ledger/:id/repay алдаа', { err: err?.message });
       return res.status(500).json({ status: 'error', error: 'Internal Server Error' });
     }
   });

@@ -150,7 +150,31 @@ export function exclusionMarker(txn) {
   };
 }
 
+// ===================== ХЭСЭГЧИЛСЭН БУЦААЛТ (019) =====================
+//  ⚠️ Буцаалт нь эх бичлэгийг ЗАСАХГҮЙ — ЭСРЭГ чиглэлтэй ТУСДАА эвент.
+//  Тиймээс netBalances() дээрх тэмдэгтэй нийлбэр нь ӨӨРЧЛӨЛТГҮЙГЭЭР зөв:
+//     +50,000 (i_lent) + −20,000 (буцаалт, i_borrowed) = 30,000.
+//  Энд зөвхөн ХАРУУЛАХ туслахууд.
+
+/** Энэ мөр нь буцаалтын эвент мөн үү (эх бичлэг БИШ)? */
+export function isRepayment(entry) {
+  return entry?.repaysEntryId != null;
+}
+
+/**
+ * Эх бичлэгийн үлдэгдэл өр. Сервер `outstanding`-ыг тооцоолж илгээдэг тул
+ * үүнийг ЭХЛЭЭД хэрэглэнэ (нэг эх сурвалж); байхгүй бол бүтэн дүн.
+ * ⚠️ Буцаалтын эвент өөрөө "үлдэгдэлтэй" БИШ — 0.
+ */
+export function outstandingOf(entry) {
+  if (isRepayment(entry)) return 0;
+  const server = Number(entry?.outstanding);
+  if (Number.isFinite(server)) return Math.max(0, server);
+  return Math.max(0, Number(entry?.amount) || 0);
+}
+
 export default {
   signedAmount, netBalances, groupByCounterparty, totalsByCurrency, eurToMntDisplay, balancePhrase,
   effectiveShare, remainingExcludable, exclusionMarker,
+  isRepayment, outstandingOf,
 };
